@@ -38,6 +38,7 @@
             font-size: 3em;
             margin-bottom: 10px;
             background: linear-gradient(45deg, #fff, #a8edea);
+            background-clip: text;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -45,6 +46,23 @@
         .header p {
             font-size: 1.2em;
             opacity: 0.9;
+        }
+
+        .header .subtitle {
+            font-size: 0.9em;
+            opacity: 0.7;
+            margin-top: 10px;
+            font-style: italic;
+        }
+
+        .price-source {
+            display: inline-block;
+            padding: 5px 15px;
+            background: rgba(16, 185, 129, 0.3);
+            border-radius: 15px;
+            font-size: 0.85em;
+            margin: 5px;
+            border: 1px solid rgba(16, 185, 129, 0.5);
         }
 
         .status {
@@ -332,6 +350,11 @@
         <div class="header">
             <h1>🤖 Multi-Token Arbitrage Bot</h1>
             <p>Real-time monitoring of tokenized stock arbitrage opportunities</p>
+            <div class="subtitle">
+                <span class="price-source">🪐 Jupiter Aggregator</span>
+                <span class="price-source">📊 Real DEX Prices</span>
+                <span class="price-source">✅ Live Oracle Data</span>
+            </div>
             <div class="status" id="status">● LIVE</div>
         </div>
 
@@ -394,8 +417,8 @@
                     <tr>
                         <th>Time</th>
                         <th>Token</th>
-                        <th>Remora Price</th>
-                        <th>Oracle Price</th>
+                        <th>Jupiter Price (DEX)</th>
+                        <th>Oracle Price (Yahoo)</th>
                         <th>Spread</th>
                         <th>Est. Profit</th>
                         <th>Direction</th>
@@ -541,7 +564,7 @@
             }
 
             const csv = [
-                ['Timestamp', 'Token', 'Remora Price', 'Oracle Price', 'Spread %', 'Est. Profit', 'Direction'],
+                ['Timestamp', 'Token', 'Jupiter Price (DEX)', 'Oracle Price (Yahoo)', 'Spread %', 'Est. Profit', 'Direction'],
                 ...allOpportunities.map(opp => [
                     new Date(opp.timestamp).toISOString(),
                     opp.token || 'TSLAr',
