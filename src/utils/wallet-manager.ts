@@ -136,18 +136,24 @@ export class WalletManager {
 
       // Get USDC balance (token account)
       try {
+        logger.debug(`Fetching USDC balance for ${wallet.name}, mint: ${this.usdcMint.toBase58()}`);
         const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
           wallet.publicKey,
           { mint: this.usdcMint }
         );
 
+        logger.debug(`Found ${tokenAccounts.value.length} USDC token accounts`);
+
         if (tokenAccounts.value.length > 0) {
           const usdcAccount = tokenAccounts.value[0].account.data.parsed.info;
           wallet.usdcBalance = parseFloat(usdcAccount.tokenAmount.uiAmount || '0');
+          logger.debug(`USDC balance: ${wallet.usdcBalance}`);
         } else {
+          logger.warn(`No USDC token account found for ${wallet.name}`);
           wallet.usdcBalance = 0;
         }
-      } catch (error) {
+      } catch (error: any) {
+        logger.error(`Error fetching USDC balance: ${error.message}`);
         wallet.usdcBalance = 0;
       }
 
@@ -338,22 +344,31 @@ export class WalletManager {
    */
   async hasInsufficientBalance(publicKey: string, requiredUSDC: number): Promise<boolean> {
     const wallet = this.wallets.get(publicKey);
-    if (!wallet) return true;
+    if (!wallet) {
+      logger.error(`Wallet not found: ${publicKey}`);
+      return true;
+    }
 
     await this.updateWalletBalance(wallet);
     
+    logger.info(`💰 Balance Check for ${wallet.name}:`);
+    logger.info(`   SOL: ${wallet.solBalance.toFixed(4)}`);
+    logger.info(`   USDC: $${wallet.usdcBalance.toFixed(2)}`);
+    logger.info(`   Required: $${requiredUSDC.toFixed(2)}`);
+    
     // Check USDC balance
     if (wallet.usdcBalance < requiredUSDC) {
-      logger.warn(`${wallet.name} has insufficient USDC: ${wallet.usdcBalance.toFixed(2)} < ${requiredUSDC.toFixed(2)}`);
+      logger.warn(`❌ Insufficient USDC: ${wallet.usdcBalance.toFixed(2)} < ${requiredUSDC.toFixed(2)}`);
       return true;
     }
 
     // Check SOL balance for transaction fees (minimum 0.01 SOL)
     if (wallet.solBalance < 0.01) {
-      logger.warn(`${wallet.name} has insufficient SOL for fees: ${wallet.solBalance.toFixed(4)}`);
+      logger.warn(`❌ Insufficient SOL for fees: ${wallet.solBalance.toFixed(4)}`);
       return true;
     }
 
+    logger.info(`✅ Balance sufficient for trade`);
     return false;
   }
 

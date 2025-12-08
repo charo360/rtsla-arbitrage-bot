@@ -164,21 +164,29 @@ export class JupiterClient {
       logger.info('🔄 Building swap transaction...');
 
       // Get swap transaction
-      const swapResponse = await this.jupiterApi.swapPost({
-        swapRequest: {
-          quoteResponse: quote,
-          userPublicKey: userKeypair.publicKey.toBase58(),
-          dynamicComputeUnitLimit: true,
-          prioritizationFeeLamports: {
-            priorityLevelWithMaxLamports: {
-              maxLamports: Math.floor(priorityFee * 1_000_000_000),
-              priorityLevel: 'high'
-            }
+      let swapResponse;
+      try {
+        swapResponse = await this.jupiterApi.swapPost({
+          swapRequest: {
+            quoteResponse: quote,
+            userPublicKey: userKeypair.publicKey.toBase58(),
+            dynamicComputeUnitLimit: true,
+            prioritizationFeeLamports: {
+              priorityLevelWithMaxLamports: {
+                maxLamports: Math.floor(priorityFee * 1_000_000_000),
+                priorityLevel: 'high'
+              }
+            },
           },
-        },
-      });
+        });
+      } catch (swapError: any) {
+        logger.error(`Jupiter swap API error: ${swapError.message}`);
+        logger.error(`Error details: ${JSON.stringify(swapError.response?.data || swapError)}`);
+        throw new Error(`Jupiter swap failed: ${swapError.message}`);
+      }
 
       if (!swapResponse || !swapResponse.swapTransaction) {
+        logger.error(`Swap response: ${JSON.stringify(swapResponse)}`);
         throw new Error('Failed to get swap transaction from Jupiter');
       }
 
