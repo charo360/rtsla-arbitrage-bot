@@ -9,8 +9,10 @@ export interface Config {
   // Network
   rpcUrl: string;
   
-  // Wallet
+  // Wallet (supports single or multiple)
   walletPrivateKey: string;
+  walletPrivateKeys: string[]; // Multiple wallets for distributed trading
+  walletSelectionStrategy: 'round_robin' | 'highest_balance' | 'least_used' | 'random';
   
   // Trading Parameters
   minSpreadPercent: number;
@@ -73,9 +75,35 @@ export interface Config {
 }
 
 function loadConfig(): Config {
-  // Validate required environment variables
-  if (!process.env.WALLET_PRIVATE_KEY) {
-    console.warn('⚠️  WALLET_PRIVATE_KEY not set. Bot will run in monitoring-only mode.');
+  // Parse multiple wallets if provided
+  let walletPrivateKeys: string[] = [];
+  
+  // Check for multiple wallets (comma-separated or individual env vars)
+  if (process.env.WALLET_PRIVATE_KEYS) {
+    // Comma-separated list
+    walletPrivateKeys = process.env.WALLET_PRIVATE_KEYS
+      .split(',')
+      .map(key => key.trim())
+      .filter(key => key.length > 0);
+  } else {
+    // Check for individual wallet env vars (WALLET_1, WALLET_2, etc.)
+    let i = 1;
+    while (process.env[`WALLET_${i}`]) {
+      walletPrivateKeys.push(process.env[`WALLET_${i}`]!);
+      i++;
+    }
+  }
+  
+  // Fallback to single wallet if no multiple wallets found
+  if (walletPrivateKeys.length === 0 && process.env.WALLET_PRIVATE_KEY) {
+    walletPrivateKeys = [process.env.WALLET_PRIVATE_KEY];
+  }
+  
+  // Validate wallets
+  if (walletPrivateKeys.length === 0) {
+    console.warn('⚠️  No wallets configured. Bot will run in monitoring-only mode.');
+  } else {
+    console.log(`✅ Loaded ${walletPrivateKeys.length} wallet(s)`);
   }
   
   return {
@@ -84,6 +112,8 @@ function loadConfig(): Config {
     
     // Wallet
     walletPrivateKey: process.env.WALLET_PRIVATE_KEY || '',
+    walletPrivateKeys: walletPrivateKeys,
+    walletSelectionStrategy: (process.env.WALLET_SELECTION_STRATEGY as any) || 'round_robin',
     
     // Trading Parameters
     minSpreadPercent: parseFloat(process.env.MIN_SPREAD_PERCENT || '0.8'),
