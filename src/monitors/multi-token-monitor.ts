@@ -1,8 +1,9 @@
 import { PriceFetcher } from '../utils/price-fetcher';
+import { JupiterClient } from '../utils/jupiter-client';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
 import { WalletManager, WalletSelectionStrategy } from '../utils/wallet-manager';
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -26,6 +27,7 @@ interface TokenOpportunity {
 
 export class MultiTokenMonitor {
   private priceFetcher: PriceFetcher;
+  private jupiterClient: JupiterClient;
   private walletManager: WalletManager | null = null;
   private connection: Connection;
   private tokens: TokenConfig[] = [];
@@ -41,6 +43,7 @@ export class MultiTokenMonitor {
   constructor() {
     this.priceFetcher = new PriceFetcher();
     this.connection = new Connection(config.rpcUrl, 'confirmed');
+    this.jupiterClient = new JupiterClient(this.connection);
     this.initializeTokens();
     this.initializeWalletManager();
   }
@@ -260,16 +263,25 @@ export class MultiTokenMonitor {
 
   private async getRemoraPrice(token: TokenConfig): Promise<number | null> {
     try {
-      // Simulate Remora pool price (in production, fetch from actual pool)
-      // For now, use Yahoo price with slight variation
+      // Get REAL DEX price from Jupiter (aggregates all DEXs including Remora)
+      const tokenMint = new PublicKey(token.mintAddress);
+      const price = await this.jupiterClient.getTokenPrice(tokenMint);
+      
+      if (price) {
+        return price;
+      }
+      
+      // Fallback to simulated price if Jupiter fails
+      logger.debug(`Jupiter price failed for ${token.symbol}, using fallback`);
       const yahooPrice = await this.getYahooPrice(token.yahooSymbol);
       if (!yahooPrice) return null;
 
-      // Simulate 0.5-2% difference
+      // Simulate 0.5-2% difference as fallback
       const variation = (Math.random() * 1.5 + 0.5) / 100;
       const direction = Math.random() > 0.5 ? 1 : -1;
       return yahooPrice * (1 + (direction * variation));
     } catch (error) {
+      logger.debug(`Error getting price for ${token.symbol}: ${error}`);
       return null;
     }
   }

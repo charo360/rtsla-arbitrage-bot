@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { PythHttpClient, getPythProgramKeyForCluster } from '@pythnetwork/client';
+import { JupiterClient } from './jupiter-client';
 import { logger } from './logger';
 import { config } from '../config/config';
 
@@ -14,6 +15,7 @@ export interface PriceData {
 export class PriceFetcher {
   private connection: Connection;
   private pythClient: PythHttpClient;
+  private jupiterClient: JupiterClient;
   private priceCache: Map<string, { price: number; timestamp: number }>;
   private readonly CACHE_DURATION_MS = 2000; // 2 seconds
   
@@ -25,6 +27,9 @@ export class PriceFetcher {
       this.connection,
       getPythProgramKeyForCluster('mainnet-beta')
     );
+    
+    // Initialize Jupiter client for real DEX prices
+    this.jupiterClient = new JupiterClient(this.connection);
     
     this.priceCache = new Map();
   }
@@ -99,37 +104,49 @@ export class PriceFetcher {
   }
   
   /**
-   * Get simulated Remora pool price
-   * TODO: Replace with actual on-chain query when addresses are known
+   * Get real DEX price from Jupiter (aggregates all DEXs including Remora)
    */
-  async getRemoraPoolPrice(): Promise<PriceData | null> {
+  async getRemoraPoolPrice(tokenMint?: PublicKey): Promise<PriceData | null> {
     try {
-      // METHOD 1: Try to get real NASDAQ price and add small offset
-      const realPrice = await this.getRealTeslaPrice();
+      // Default to TSLAr if no token specified
+      const mint = tokenMint || config.tokens.rTSLA;
       
-      if (realPrice) {
-        // Simulate Remora pool trading slightly below NASDAQ (0.5-2% discount)
-        const discount = 0.005 + (Math.random() * 0.015); // 0.5% to 2%
-        const simulatedPrice = realPrice.price * (1 - discount);
+      if (!mint) {
+        logger.warn('No token mint provided for Jupiter price');
+        return null;
+      }
+
+      const cacheKey = `jupiter_${mint.toBase58()}`;
+      const cached = this.priceCache.get(cacheKey);
+      
+      if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION_MS) {
+        return {
+          source: 'Jupiter (Real DEX Price)',
+          price: cached.price,
+          timestamp: cached.timestamp,
+        };
+      }
+      
+      // Get real price from Jupiter
+      const price = await this.jupiterClient.getTokenPrice(mint);
+      
+      if (price) {
+        this.priceCache.set(cacheKey, {
+          price,
+          timestamp: Date.now(),
+        });
         
         return {
-          source: 'Remora Pool (Simulated)',
-          price: simulatedPrice,
+          source: 'Jupiter (Real DEX Price)',
+          price,
           timestamp: Date.now(),
         };
       }
       
-      // METHOD 2: If real price fails, use hardcoded example
-      // This will be replaced with actual on-chain query
-      logger.warn('Using fallback price data - replace with actual Remora integration');
-      
-      return {
-        source: 'Remora Pool (Mock)',
-        price: 454.73, // Mock price
-        timestamp: Date.now(),
-      };
+      logger.warn('Failed to get Jupiter price, using fallback');
+      return null;
     } catch (error: any) {
-      logger.error('Error fetching Remora pool price:', error);
+      logger.error('Error fetching Jupiter price:', error.message);
       return null;
     }
   }
