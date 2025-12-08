@@ -1,6 +1,7 @@
 import { MultiTokenMonitor } from './monitors/multi-token-monitor';
 import { logger, logStartup } from './utils/logger';
 import { config } from './config/config';
+import { startDashboard } from './dashboard/server';
 
 class MultiTokenArbitrageBot {
   private monitor: MultiTokenMonitor;
@@ -36,6 +37,9 @@ class MultiTokenArbitrageBot {
       }
       
       this.isRunning = true;
+      
+      // Start dashboard server
+      startDashboard();
       
       // Start monitoring all tokens
       await this.monitor.startMonitoring();
