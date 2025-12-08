@@ -1,6 +1,8 @@
 import { PriceFetcher } from '../utils/price-fetcher';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
+import { WalletManager, WalletSelectionStrategy } from '../utils/wallet-manager';
+import { Connection } from '@solana/web3.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -24,6 +26,8 @@ interface TokenOpportunity {
 
 export class MultiTokenMonitor {
   private priceFetcher: PriceFetcher;
+  private walletManager: WalletManager | null = null;
+  private connection: Connection;
   private tokens: TokenConfig[] = [];
   private opportunities: TokenOpportunity[] = [];
   private stats: Map<string, {
@@ -36,7 +40,47 @@ export class MultiTokenMonitor {
 
   constructor() {
     this.priceFetcher = new PriceFetcher();
+    this.connection = new Connection(config.rpcUrl, 'confirmed');
     this.initializeTokens();
+    this.initializeWalletManager();
+  }
+
+  private initializeWalletManager(): void {
+    // Only initialize if wallets are configured
+    if (config.walletPrivateKeys.length === 0) {
+      logger.warn('💼 No wallets configured - running in monitoring mode only');
+      return;
+    }
+
+    try {
+      // Map strategy string to enum
+      const strategyMap: Record<string, WalletSelectionStrategy> = {
+        'round_robin': WalletSelectionStrategy.ROUND_ROBIN,
+        'highest_balance': WalletSelectionStrategy.HIGHEST_BALANCE,
+        'least_used': WalletSelectionStrategy.LEAST_USED,
+        'random': WalletSelectionStrategy.RANDOM
+      };
+
+      const strategy = strategyMap[config.walletSelectionStrategy] || WalletSelectionStrategy.ROUND_ROBIN;
+
+      this.walletManager = new WalletManager(
+        this.connection,
+        config.tokens.usdc,
+        strategy
+      );
+
+      // Add all wallets
+      this.walletManager.addWallets(config.walletPrivateKeys, 'Trading');
+
+      logger.info(`💼 Wallet Manager initialized with ${config.walletPrivateKeys.length} wallet(s)`);
+      logger.info(`📊 Selection strategy: ${config.walletSelectionStrategy}`);
+
+      // Print initial wallet summary
+      this.walletManager.printSummary();
+    } catch (error: any) {
+      logger.error(`Failed to initialize wallet manager: ${error.message}`);
+      this.walletManager = null;
+    }
   }
 
   private initializeTokens(): void {
@@ -305,5 +349,21 @@ export class MultiTokenMonitor {
 
   getTokenOpportunities(symbol: string): TokenOpportunity[] {
     return this.opportunities.filter(opp => opp.token === symbol);
+  }
+
+  getWalletManager(): WalletManager | null {
+    return this.walletManager;
+  }
+
+  async updateWalletBalances(): Promise<void> {
+    if (this.walletManager) {
+      await this.walletManager.updateAllBalances();
+    }
+  }
+
+  printWalletSummary(): void {
+    if (this.walletManager) {
+      this.walletManager.printSummary();
+    }
   }
 }

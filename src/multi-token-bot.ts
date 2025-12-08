@@ -54,7 +54,7 @@ class MultiTokenArbitrageBot {
     }
   }
   
-  private shutdown(): void {
+  private async shutdown(): Promise<void> {
     if (!this.isRunning) return;
     
     logger.info('\n🛑 Shutting down gracefully...');
@@ -75,6 +75,14 @@ class MultiTokenArbitrageBot {
     });
     
     logger.info('\n' + '='.repeat(80));
+    
+    // Show wallet summary if wallets are configured
+    const walletManager = this.monitor.getWalletManager();
+    if (walletManager) {
+      logger.info('\n💼 Updating final wallet balances...');
+      await this.monitor.updateWalletBalances();
+      this.monitor.printWalletSummary();
+    }
     
     this.isRunning = false;
     process.exit(0);
