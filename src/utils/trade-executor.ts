@@ -1,5 +1,6 @@
 import { Connection, Transaction, PublicKey } from '@solana/web3.js';
 import { WalletManager } from './wallet-manager';
+import { JupiterClient } from './jupiter-client';
 import { logger } from './logger';
 import { config } from '../config/config';
 
@@ -25,10 +26,12 @@ export interface TradeResult {
 export class TradeExecutor {
   private connection: Connection;
   private walletManager: WalletManager;
+  private jupiterClient: JupiterClient;
 
   constructor(connection: Connection, walletManager: WalletManager) {
     this.connection = connection;
     this.walletManager = walletManager;
+    this.jupiterClient = new JupiterClient(connection);
   }
 
   /**
@@ -125,24 +128,14 @@ export class TradeExecutor {
   }
 
   /**
-   * Execute the actual blockchain transaction
-   * This is a placeholder - implement actual DEX trading logic here
+   * Execute the actual blockchain transaction using Jupiter
    */
   private async executeTradeTransaction(
     keypair: any,
     params: TradeParams
   ): Promise<TradeResult> {
     try {
-      // PLACEHOLDER: This is where you would implement actual trading logic
-      // For now, we'll simulate a trade
-      
-      logger.info('📝 Building transaction...');
-      
-      // In a real implementation, you would:
-      // 1. Build swap transaction for Remora DEX
-      // 2. Sign transaction with wallet keypair
-      // 3. Send and confirm transaction
-      // 4. Calculate actual profit from transaction result
+      logger.info('📝 Building transaction with Jupiter...');
       
       // Simulated result for monitoring mode
       if (!config.autoExecute) {
@@ -154,41 +147,56 @@ export class TradeExecutor {
         };
       }
 
-      // TODO: Implement actual trading logic here
-      // Example structure:
-      /*
-      const transaction = new Transaction();
-      
-      // Add swap instruction (Remora DEX)
-      transaction.add(
-        // Your swap instruction here
-      );
-      
-      // Sign and send
-      const signature = await this.connection.sendTransaction(
-        transaction,
-        [keypair],
-        { skipPreflight: false }
-      );
-      
-      // Confirm
-      await this.connection.confirmTransaction(signature, 'confirmed');
-      
-      // Calculate actual profit
-      const actualProfit = calculateActualProfit(transaction);
-      
-      return {
-        success: true,
-        signature,
-        profit: actualProfit
-      };
-      */
+      // Real trading with Jupiter
+      logger.info('🚀 Executing real trade via Jupiter...');
 
-      logger.warn('⚠️  Actual trading not implemented yet - returning simulated result');
+      // Get quote from Jupiter
+      const slippageBps = Math.floor(config.maxSlippagePercent * 100); // Convert % to basis points
+      const quote = await this.jupiterClient.getQuote(
+        params.tokenMint,
+        params.amount,
+        slippageBps
+      );
+
+      if (!quote) {
+        throw new Error('Failed to get quote from Jupiter');
+      }
+
+      // Log quote details
+      const outputAmount = parseInt(quote.outAmount) / 1_000_000;
+      const priceImpact = parseFloat(quote.priceImpactPct);
+      
+      logger.info(`📊 Jupiter Quote:`);
+      logger.info(`   Input: ${params.amount} USDC`);
+      logger.info(`   Output: ${outputAmount.toFixed(6)} tokens`);
+      logger.info(`   Price Impact: ${priceImpact.toFixed(2)}%`);
+
+      // Check price impact
+      if (priceImpact > 2.0) {
+        logger.warn(`⚠️  High price impact: ${priceImpact.toFixed(2)}% - trade may not be profitable`);
+      }
+
+      // Execute swap
+      const swapResult = await this.jupiterClient.executeSwap(quote, keypair);
+
+      if (!swapResult.success) {
+        throw new Error(swapResult.error || 'Swap failed');
+      }
+
+      // Calculate actual profit
+      // For BUY_REMORA: we bought tokens cheap, need to sell them at oracle price
+      // For now, we'll use the expected profit as we need to implement the sell side
+      const actualProfit = params.expectedProfit; // TODO: Calculate from actual execution
+
+      logger.info(`✅ Trade executed successfully via Jupiter!`);
+      logger.info(`   Signature: ${swapResult.signature}`);
+      logger.info(`   Input: ${swapResult.inputAmount} USDC`);
+      logger.info(`   Output: ${swapResult.outputAmount} tokens`);
+
       return {
         success: true,
-        signature: 'SIMULATED_' + Date.now(),
-        profit: params.expectedProfit
+        signature: swapResult.signature,
+        profit: actualProfit
       };
 
     } catch (error: any) {
