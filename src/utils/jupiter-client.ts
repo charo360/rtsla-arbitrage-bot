@@ -114,19 +114,28 @@ export class JupiterClient {
    */
   async getTokenPrice(tokenMint: PublicKey): Promise<number | null> {
     try {
-      // Get quote for 1 token
-      const quote = await this.getQuoteReverse(tokenMint, 1, 6);
+      // Get quote for buying $100 worth of the token to get accurate price
+      const quote = await this.getQuote(tokenMint, 100, 50);
 
       if (!quote) {
         return null;
       }
 
-      // Convert output amount (USDC with 6 decimals) to actual USDC
-      const usdcAmount = parseInt(quote.outAmount) / 1_000_000;
+      // Calculate price per token
+      // inAmount = USDC spent (in lamports, 6 decimals)
+      // outAmount = tokens received (in lamports, 6 decimals)
+      const usdcSpent = parseInt(quote.inAmount) / 1_000_000;
+      const tokensReceived = parseInt(quote.outAmount) / 1_000_000;
+      
+      if (tokensReceived === 0) {
+        return null;
+      }
+      
+      const pricePerToken = usdcSpent / tokensReceived;
 
-      logger.debug(`Jupiter price for ${tokenMint.toBase58().slice(0, 8)}...: $${usdcAmount.toFixed(2)}`);
+      logger.debug(`Jupiter price for ${tokenMint.toBase58().slice(0, 8)}...: $${pricePerToken.toFixed(2)}`);
 
-      return usdcAmount;
+      return pricePerToken;
     } catch (error: any) {
       logger.error(`Error getting token price: ${error.message}`);
       return null;
