@@ -52,20 +52,23 @@ export class JupiterClient {
         asLegacyTransaction: false,
       };
 
-      logger.debug(`Requesting Jupiter quote: ${amountUsdc} USDC → ${outputMint.toBase58().slice(0, 8)}...`);
+      logger.debug(`Requesting Jupiter quote: ${amountUsdc} USDC → ${outputMint.toBase58()}`);
 
       const quote = await this.jupiterApi.quoteGet(quoteRequest);
 
       if (!quote) {
-        logger.warn('No quote received from Jupiter');
+        logger.warn(`No quote received from Jupiter for ${outputMint.toBase58()}`);
         return null;
       }
 
-      logger.debug(`Quote received: ${quote.outAmount} tokens, impact: ${quote.priceImpactPct}%`);
+      logger.debug(`Quote received for ${outputMint.toBase58().slice(0, 8)}...: ${quote.outAmount} tokens, impact: ${quote.priceImpactPct}%`);
 
       return quote;
     } catch (error: any) {
-      logger.error(`Error getting Jupiter quote: ${error.message}`);
+      logger.error(`Error getting Jupiter quote for ${outputMint.toBase58()}: ${error.message}`);
+      if (error.response) {
+        logger.error(`Jupiter API response: ${JSON.stringify(error.response.data)}`);
+      }
       return null;
     }
   }
@@ -115,29 +118,36 @@ export class JupiterClient {
   async getTokenPrice(tokenMint: PublicKey): Promise<number | null> {
     try {
       // Get quote for buying $100 worth of the token to get accurate price
+      logger.debug(`Getting price for token: ${tokenMint.toBase58()}`);
       const quote = await this.getQuote(tokenMint, 100, 50);
 
       if (!quote) {
+        logger.warn(`No quote available for ${tokenMint.toBase58()}`);
         return null;
       }
 
       // Calculate price per token
       // inAmount = USDC spent (in lamports, 6 decimals)
-      // outAmount = tokens received (in lamports, 6 decimals)
+      // outAmount = tokens received (in lamports, typically 9 decimals for these tokens)
       const usdcSpent = parseInt(quote.inAmount) / 1_000_000;
-      const tokensReceived = parseInt(quote.outAmount) / 1_000_000;
+      
+      // Remora tokenized stocks use 9 decimals
+      const tokensReceived = parseInt(quote.outAmount) / 1_000_000_000;
+      
+      logger.debug(`Quote details: ${usdcSpent} USDC → ${tokensReceived} tokens`);
       
       if (tokensReceived === 0) {
+        logger.warn(`Zero tokens received in quote for ${tokenMint.toBase58()}`);
         return null;
       }
       
       const pricePerToken = usdcSpent / tokensReceived;
 
-      logger.debug(`Jupiter price for ${tokenMint.toBase58().slice(0, 8)}...: $${pricePerToken.toFixed(2)}`);
+      logger.info(`✅ Jupiter price for ${tokenMint.toBase58().slice(0, 8)}...: $${pricePerToken.toFixed(2)} (${usdcSpent} USDC / ${tokensReceived} tokens)`);
 
       return pricePerToken;
     } catch (error: any) {
-      logger.error(`Error getting token price: ${error.message}`);
+      logger.error(`Error getting token price for ${tokenMint.toBase58()}: ${error.message}`);
       return null;
     }
   }
