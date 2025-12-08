@@ -1,6 +1,7 @@
 import { Connection, Transaction, PublicKey } from '@solana/web3.js';
 import { WalletManager } from './wallet-manager';
 import { JupiterClient } from './jupiter-client';
+import { FlashTradeClient } from './flashtrade-client';
 import { logger } from './logger';
 import { config } from '../config/config';
 
@@ -27,11 +28,13 @@ export class TradeExecutor {
   private connection: Connection;
   private walletManager: WalletManager;
   private jupiterClient: JupiterClient;
+  private flashTradeClient: FlashTradeClient;
 
   constructor(connection: Connection, walletManager: WalletManager) {
     this.connection = connection;
     this.walletManager = walletManager;
     this.jupiterClient = new JupiterClient(connection);
+    this.flashTradeClient = new FlashTradeClient({ connection });
   }
 
   /**
@@ -176,28 +179,62 @@ export class TradeExecutor {
         logger.warn(`⚠️  High price impact: ${priceImpact.toFixed(2)}% - trade may not be profitable`);
       }
 
-      // Execute swap
+      // Execute swap on Jupiter (BUY side)
       const swapResult = await this.jupiterClient.executeSwap(quote, keypair);
 
       if (!swapResult.success) {
-        throw new Error(swapResult.error || 'Swap failed');
+        throw new Error(swapResult.error || 'Jupiter swap failed');
       }
 
-      // Calculate actual profit
-      // For BUY_REMORA: we bought tokens cheap, need to sell them at oracle price
-      // For now, we'll use the expected profit as we need to implement the sell side
-      const actualProfit = params.expectedProfit; // TODO: Calculate from actual execution
-
-      logger.info(`✅ Trade executed successfully via Jupiter!`);
+      logger.info(`✅ Jupiter buy executed!`);
       logger.info(`   Signature: ${swapResult.signature}`);
       logger.info(`   Input: ${swapResult.inputAmount} USDC`);
       logger.info(`   Output: ${swapResult.outputAmount} tokens`);
 
-      return {
-        success: true,
-        signature: swapResult.signature,
-        profit: actualProfit
-      };
+      // Execute complete arbitrage: Jupiter buy → Flash.trade sell
+      if (params.direction === 'BUY_REMORA') {
+        logger.info('🔄 Executing sell side on Flash.trade...');
+        
+        const arbResult = await this.flashTradeClient.executeArbitrageTrade(
+          keypair,
+          params.tokenMint,
+          params.token,
+          params.amount,
+          swapResult.signature!
+        );
+
+        if (!arbResult.success) {
+          logger.error('⚠️  Flash.trade sell failed - tokens remain in wallet');
+          // Note: Jupiter buy succeeded, but sell failed
+          // Tokens are in user's wallet, can try to sell manually
+          return {
+            success: false,
+            signature: swapResult.signature,
+            error: 'Flash.trade sell failed after successful Jupiter buy'
+          };
+        }
+
+        logger.info(`✅ Complete arbitrage executed!`);
+        logger.info(`   Buy (Jupiter): ${swapResult.signature}`);
+        logger.info(`   Sell (Flash.trade): ${arbResult.sellSignature}`);
+        logger.info(`   💰 Profit: $${arbResult.profit?.toFixed(2)}`);
+
+        return {
+          success: true,
+          signature: `${swapResult.signature}|${arbResult.sellSignature}`, // Both signatures
+          profit: arbResult.profit
+        };
+      } else {
+        // SELL_REMORA direction (reverse arbitrage - less common)
+        // For now, just return Jupiter result
+        logger.warn('SELL_REMORA direction not fully implemented yet');
+        
+        return {
+          success: true,
+          signature: swapResult.signature,
+          profit: params.expectedProfit
+        };
+      }
 
     } catch (error: any) {
       logger.error(`Transaction error: ${error.message}`);
