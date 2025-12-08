@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>rTSLA Arbitrage Bot - Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 8px 20px;
+            background: #10b981;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .status.offline {
+            background: #ef4444;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 25px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #10b981;
+        }
+
+        .stat-value.warning {
+            color: #f59e0b;
+        }
+
+        .stat-value.danger {
+            color: #ef4444;
+        }
+
+        .opportunities-section {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 30px;
+        }
+
+        .opportunities-section h2 {
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+
+        .opportunity-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 4px solid #10b981;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            align-items: center;
+        }
+
+        .opportunity-item.executing {
+            border-left-color: #f59e0b;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .opp-detail {
+            text-align: center;
+        }
+
+        .opp-label {
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-bottom: 5px;
+        }
+
+        .opp-value {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        .opp-value.profit {
+            color: #10b981;
+        }
+
+        .chart-container {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 30px;
+        }
+
+        .chart-container h2 {
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+
+        .price-display {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .price-box {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .price-source {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+        }
+
+        .price-amount {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #60a5fa;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            opacity: 0.6;
+            font-size: 1.1em;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 20px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            text-align: center;
+        }
+
+        button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            margin: 5px;
+            transition: background 0.3s ease;
+        }
+
+        button:hover {
+            background: #059669;
+        }
+
+        button:disabled {
+            background: #6b7280;
+            cursor: not-allowed;
+        }
+
+        .last-update {
+            text-align: center;
+            opacity: 0.7;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid #10b981;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 rTSLA Arbitrage Bot Dashboard</h1>
+            <div class="status" id="status">
+                <span id="statusText">Connecting...</span>
+                <span class="spinner" id="spinner"></span>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Total Opportunities</div>
+                <div class="stat-value" id="totalOpps">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Opportunities Today</div>
+                <div class="stat-value warning" id="todayOpps">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Average Spread</div>
+                <div class="stat-value" id="avgSpread">0.00%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Estimated Profit</div>
+                <div class="stat-value" id="totalProfit">$0.00</div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <h2>📊 Current Prices</h2>
+            <div class="price-display">
+                <div class="price-box">
+                    <div class="price-source">Remora Pool</div>
+                    <div class="price-amount" id="remoraPrice">--</div>
+                </div>
+                <div class="price-box">
+                    <div class="price-source">Pyth Oracle (NASDAQ)</div>
+                    <div class="price-amount" id="pythPrice">--</div>
+                </div>
+                <div class="price-box">
+                    <div class="price-source">Current Spread</div>
+                    <div class="price-amount" id="currentSpread">--</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="opportunities-section">
+            <h2>🎯 Recent Opportunities</h2>
+            <div id="opportunitiesList">
+                <div class="no-data">No opportunities detected yet. Bot is monitoring...</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button onclick="loadData()">🔄 Refresh Data</button>
+            <button onclick="clearData()">🗑️ Clear History</button>
+            <button onclick="exportData()">📥 Export CSV</button>
+        </div>
+
+        <div class="last-update" id="lastUpdate">Last updated: Never</div>
+    </div>
+
+    <script>
+        let opportunities = [];
+        let autoRefreshInterval = null;
+
+        // Load opportunities from API
+        async function loadData() {
+            try {
+                const response = await fetch('/api/opportunities');
+                const data = await response.json();
+                
+                if (data.success) {
+                    opportunities = data.opportunities || [];
+                    updateDashboard();
+                    updateStatus('online');
+                } else {
+                    updateStatus('offline', 'Error loading data');
+                }
+            } catch (error) {
+                console.error('Error loading data:', error);
+                
+                // Fallback: try loading from file directly
+                try {
+                    const fileResponse = await fetch('../data/opportunities.json');
+                    if (fileResponse.ok) {
+                        opportunities = await fileResponse.json();
+                        updateDashboard();
+                        updateStatus('online');
+                    } else {
+                        updateStatus('offline', 'No data yet. Start the bot!');
+                    }
+                } catch (fallbackError) {
+                    updateStatus('offline', 'Cannot connect. Is dashboard server running?');
+                }
+            }
+        }
+
+        // Update dashboard with latest data
+        function updateDashboard() {
+            if (opportunities.length === 0) {
+                return;
+            }
+
+            // Calculate stats
+            const totalOpps = opportunities.length;
+            
+            // Today's opportunities
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const todayOpps = opportunities.filter(opp => 
+                new Date(opp.timestamp) >= today
+            ).length;
+
+            // Average spread
+            const avgSpread = opportunities.reduce((sum, opp) => 
+                sum + opp.spreadPercent, 0
+            ) / totalOpps;
+
+            // Total profit
+            const totalProfit = opportunities.reduce((sum, opp) => 
+                sum + opp.estimatedProfit, 0
+            );
+
+            // Update stats
+            document.getElementById('totalOpps').textContent = totalOpps;
+            document.getElementById('todayOpps').textContent = todayOpps;
+            document.getElementById('avgSpread').textContent = avgSpread.toFixed(2) + '%';
+            document.getElementById('totalProfit').textContent = '$' + totalProfit.toFixed(2);
+
+            // Update current prices (from most recent opportunity)
+            const latest = opportunities[opportunities.length - 1];
+            document.getElementById('remoraPrice').textContent = '$' + latest.remoraPrice.toFixed(2);
+            document.getElementById('pythPrice').textContent = latest.pythPrice ? 
+                '$' + latest.pythPrice.toFixed(2) : 'N/A';
+            document.getElementById('currentSpread').textContent = latest.spreadPercent.toFixed(2) + '%';
+
+            // Display recent opportunities (last 10)
+            const recentOpps = opportunities.slice(-10).reverse();
+            const oppsList = document.getElementById('opportunitiesList');
+            
+            if (recentOpps.length > 0) {
+                oppsList.innerHTML = recentOpps.map(opp => `
+                    <div class="opportunity-item">
+                        <div class="opp-detail">
+                            <div class="opp-label">Time</div>
+                            <div class="opp-value">${new Date(opp.timestamp).toLocaleTimeString()}</div>
+                        </div>
+                        <div class="opp-detail">
+                            <div class="opp-label">Remora Price</div>
+                            <div class="opp-value">$${opp.remoraPrice.toFixed(2)}</div>
+                        </div>
+                        <div class="opp-detail">
+                            <div class="opp-label">Oracle Price</div>
+                            <div class="opp-value">$${opp.pythPrice ? opp.pythPrice.toFixed(2) : 'N/A'}</div>
+                        </div>
+                        <div class="opp-detail">
+                            <div class="opp-label">Spread</div>
+                            <div class="opp-value">${opp.spreadPercent.toFixed(2)}%</div>
+                        </div>
+                        <div class="opp-detail">
+                            <div class="opp-label">Est. Profit</div>
+                            <div class="opp-value profit">$${opp.estimatedProfit.toFixed(2)}</div>
+                        </div>
+                        <div class="opp-detail">
+                            <div class="opp-label">Direction</div>
+                            <div class="opp-value">${opp.direction === 'BUY_REMORA' ? '📈 Buy' : '📉 Sell'}</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // Update last update time
+            document.getElementById('lastUpdate').textContent = 
+                'Last updated: ' + new Date().toLocaleString();
+        }
+
+        // Update status indicator
+        function updateStatus(status, message = null) {
+            const statusEl = document.getElementById('status');
+            const statusText = document.getElementById('statusText');
+            const spinner = document.getElementById('spinner');
+
+            if (status === 'online') {
+                statusEl.classList.remove('offline');
+                statusText.textContent = '🟢 Bot Running';
+                spinner.style.display = 'none';
+            } else {
+                statusEl.classList.add('offline');
+                statusText.textContent = message || '🔴 Offline';
+                spinner.style.display = 'none';
+            }
+        }
+
+        // Clear all data
+        function clearData() {
+            if (confirm('Are you sure you want to clear all opportunity data?')) {
+                opportunities = [];
+                document.getElementById('opportunitiesList').innerHTML = 
+                    '<div class="no-data">Data cleared. Waiting for new opportunities...</div>';
+                
+                // Reset stats
+                document.getElementById('totalOpps').textContent = '0';
+                document.getElementById('todayOpps').textContent = '0';
+                document.getElementById('avgSpread').textContent = '0.00%';
+                document.getElementById('totalProfit').textContent = '$0.00';
+                
+                alert('Data cleared! Note: This only clears the dashboard, not the actual data file.');
+            }
+        }
+
+        // Export data as CSV
+        function exportData() {
+            if (opportunities.length === 0) {
+                alert('No data to export!');
+                return;
+            }
+
+            const csv = [
+                ['Timestamp', 'Remora Price', 'Oracle Price', 'Spread %', 'Est. Profit', 'Direction'],
+                ...opportunities.map(opp => [
+                    new Date(opp.timestamp).toISOString(),
+                    opp.remoraPrice,
+                    opp.pythPrice || 'N/A',
+                    opp.spreadPercent,
+                    opp.estimatedProfit,
+                    opp.direction
+                ])
+            ].map(row => row.join(',')).join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `rtsla-opportunities-${Date.now()}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Auto-refresh every 10 seconds
+        function startAutoRefresh() {
+            autoRefreshInterval = setInterval(loadData, 10000);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+        }
+
+        // Initialize dashboard
+        window.addEventListener('load', () => {
+            loadData();
+            startAutoRefresh();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', stopAutoRefresh);
+    </script>
+</body>
+</html>
