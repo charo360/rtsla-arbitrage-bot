@@ -1,5 +1,6 @@
 import { PriceFetcher } from '../utils/price-fetcher';
 import { JupiterClient } from '../utils/jupiter-client';
+import { TradeExecutor } from '../utils/trade-executor';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
 import { WalletManager, WalletSelectionStrategy } from '../utils/wallet-manager';
@@ -28,6 +29,7 @@ interface TokenOpportunity {
 export class MultiTokenMonitor {
   private priceFetcher: PriceFetcher;
   private jupiterClient: JupiterClient;
+  private tradeExecutor: TradeExecutor | null = null;
   private walletManager: WalletManager | null = null;
   private connection: Connection;
   private tokens: TokenConfig[] = [];
@@ -77,6 +79,12 @@ export class MultiTokenMonitor {
 
       logger.info(`💼 Wallet Manager initialized with ${config.walletPrivateKeys.length} wallet(s)`);
       logger.info(`📊 Selection strategy: ${config.walletSelectionStrategy}`);
+
+      // Initialize trade executor if auto-execute is enabled
+      if (config.autoExecute) {
+        this.tradeExecutor = new TradeExecutor(this.connection, this.walletManager);
+        logger.info(`🤖 Trade Executor initialized - AUTO-EXECUTE ENABLED`);
+      }
 
       // Print initial wallet summary
       this.walletManager.printSummary();
@@ -249,6 +257,30 @@ export class MultiTokenMonitor {
 
           this.opportunities.push(opportunity);
           this.saveOpportunities();
+
+          // Execute trade if auto-execute is enabled
+          if (this.tradeExecutor && config.autoExecute) {
+            logger.info(`🚀 Executing trade for ${token.symbol}...`);
+            
+            const tradeResult = await this.tradeExecutor.executeTrade({
+              token: token.symbol,
+              tokenMint: new PublicKey(token.mintAddress),
+              direction,
+              amount: config.tradeAmountUsdc,
+              expectedProfit: estimatedProfit,
+              remoraPrice,
+              oraclePrice: yahooPrice,
+              spreadPercent
+            });
+
+            if (tradeResult.success) {
+              logger.info(`✅ Trade executed successfully!`);
+              logger.info(`   Signature: ${tradeResult.signature}`);
+              logger.info(`   Profit: $${tradeResult.profit?.toFixed(2)}`);
+            } else {
+              logger.error(`❌ Trade failed: ${tradeResult.error}`);
+            }
+          }
 
           return true;
         }

@@ -111,7 +111,7 @@ function loadConfig(): Config {
     rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
     
     // Wallet
-    walletPrivateKey: process.env.WALLET_PRIVATE_KEY || '',
+    walletPrivateKey: walletPrivateKeys.length > 0 ? walletPrivateKeys[0] : (process.env.WALLET_PRIVATE_KEY || ''),
     walletPrivateKeys: walletPrivateKeys,
     walletSelectionStrategy: (process.env.WALLET_SELECTION_STRATEGY as any) || 'round_robin',
     
