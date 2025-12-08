@@ -49,7 +49,8 @@ export class JupiterClient {
         amount: amountInLamports,
         slippageBps: slippageBps,
         onlyDirectRoutes: false,
-        asLegacyTransaction: false,
+        asLegacyTransaction: true,
+        restrictIntermediateTokens: true,
       };
 
       logger.debug(`Requesting Jupiter quote: ${amountUsdc} USDC → ${outputMint.toBase58()}`);
@@ -166,22 +167,38 @@ export class JupiterClient {
       // Get swap transaction
       let swapResponse;
       try {
+        const swapRequest = {
+          quoteResponse: quote,
+          userPublicKey: userKeypair.publicKey.toBase58(),
+          wrapAndUnwrapSol: true,
+          dynamicComputeUnitLimit: true,
+          asLegacyTransaction: false,
+          useSharedAccounts: true,
+          destinationTokenAccount: undefined, // Let Jupiter create it
+        };
+        
+        logger.debug(`Swap request: ${JSON.stringify({
+          userPublicKey: swapRequest.userPublicKey,
+          inputMint: quote.inputMint,
+          outputMint: quote.outputMint,
+          amount: quote.inAmount,
+          slippage: quote.slippageBps
+        })}`);
+        
         swapResponse = await this.jupiterApi.swapPost({
-          swapRequest: {
-            quoteResponse: quote,
-            userPublicKey: userKeypair.publicKey.toBase58(),
-            dynamicComputeUnitLimit: true,
-            prioritizationFeeLamports: {
-              priorityLevelWithMaxLamports: {
-                maxLamports: Math.floor(priorityFee * 1_000_000_000),
-                priorityLevel: 'high'
-              }
-            },
-          },
+          swapRequest,
         });
       } catch (swapError: any) {
         logger.error(`Jupiter swap API error: ${swapError.message}`);
-        logger.error(`Error details: ${JSON.stringify(swapError.response?.data || swapError)}`);
+        logger.error(`Error status: ${swapError.response?.status}`);
+        logger.error(`Error data: ${JSON.stringify(swapError.response?.data)}`);
+        logger.error(`Full error: ${JSON.stringify(swapError, null, 2)}`);
+        
+        // Check if it's a liquidity issue
+        if (swapError.response?.status === 400) {
+          throw new Error(`Jupiter swap failed: Insufficient liquidity or invalid route`);
+        }
+        
         throw new Error(`Jupiter swap failed: ${swapError.message}`);
       }
 
