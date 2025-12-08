@@ -186,11 +186,11 @@ SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 ### Flash.trade Program ID
 
 ```typescript
-// Mainnet program ID (placeholder - needs verification)
-const FLASHTRADE_PROGRAM_ID = 'FLASHiqJvT3fH7JJvXDkxKvJmhVi2Y8PqPJvYrqfhKqy';
+// Mainnet program ID (confirmed)
+const FLASHTRADE_PROGRAM_ID = 'FLASH6Lo6h3iasJKWDs2F8TkW2UKf3s15C8PMGuVfgBn';
 ```
 
-**⚠️ IMPORTANT**: The actual Flash.trade program ID needs to be verified from their official documentation or on-chain program.
+**✅ CONFIRMED**: This is the verified Flash.trade mainnet program ID for perpetuals and spot swaps.
 
 ## Trade Flow Example
 

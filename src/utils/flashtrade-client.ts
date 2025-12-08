@@ -10,7 +10,7 @@ import { logger } from './logger';
  */
 
 // Flash.trade Program IDs (mainnet)
-const FLASHTRADE_PROGRAM_ID = new PublicKey('FLASHiqJvT3fH7JJvXDkxKvJmhVi2Y8PqPJvYrqfhKqy'); // Placeholder - need actual ID
+const FLASHTRADE_PROGRAM_ID = new PublicKey('FLASH6Lo6h3iasJKWDs2F8TkW2UKf3s15C8PMGuVfgBn'); // Confirmed mainnet program
 const PYTH_PROGRAM_ID = new PublicKey('FsJ3A3u2vn5cTVofAjvy6y5kwABJAqYWpe4975bi2epH');
 
 export interface FlashTradeConfig {
