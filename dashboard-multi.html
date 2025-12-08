@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Token Arbitrage Bot - Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #fff, #a8edea);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 10px 25px;
+            background: #10b981;
+            border-radius: 25px;
+            font-weight: bold;
+            margin-top: 15px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 25px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            transition: transform 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-card h3 {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-card .value {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .label {
+            font-size: 0.85em;
+            opacity: 0.7;
+        }
+
+        .token-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .token-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            border-left: 4px solid;
+        }
+
+        .token-card.TSLAr { border-left-color: #ef4444; }
+        .token-card.CRCLr { border-left-color: #3b82f6; }
+        .token-card.SPYr { border-left-color: #10b981; }
+        .token-card.MSTRr { border-left-color: #f59e0b; }
+        .token-card.NVDAr { border-left-color: #8b5cf6; }
+
+        .token-card h4 {
+            font-size: 1.3em;
+            margin-bottom: 10px;
+        }
+
+        .token-card .token-stat {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            backdrop-filter: blur(10px);
+        }
+
+        .btn-primary {
+            background: rgba(59, 130, 246, 0.8);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: rgba(59, 130, 246, 1);
+            transform: scale(1.05);
+        }
+
+        .btn-success {
+            background: rgba(16, 185, 129, 0.8);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: rgba(16, 185, 129, 1);
+            transform: scale(1.05);
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.8);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 1);
+            transform: scale(1.05);
+        }
+
+        .filter-bar {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .filter-bar select {
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 1em;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        .filter-bar select option {
+            background: #1f2937;
+            color: white;
+        }
+
+        .opportunities-table {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 1px;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            transition: background 0.2s;
+        }
+
+        tbody tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        td {
+            padding: 15px;
+        }
+
+        .token-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .token-badge.TSLAr { background: rgba(239, 68, 68, 0.3); }
+        .token-badge.CRCLr { background: rgba(59, 130, 246, 0.3); }
+        .token-badge.SPYr { background: rgba(16, 185, 129, 0.3); }
+        .token-badge.MSTRr { background: rgba(245, 158, 11, 0.3); }
+        .token-badge.NVDAr { background: rgba(139, 92, 246, 0.3); }
+
+        .direction {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .direction.BUY_REMORA {
+            background: rgba(16, 185, 129, 0.3);
+            color: #10b981;
+        }
+
+        .direction.SELL_REMORA {
+            background: rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+        }
+
+        .profit-positive {
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        .profit-negative {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
+        .spread-high {
+            color: #10b981;
+            font-weight: 600;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 60px 20px;
+            font-size: 1.2em;
+            opacity: 0.7;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            font-size: 1.2em;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .last-updated {
+            text-align: center;
+            margin-top: 20px;
+            opacity: 0.7;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Multi-Token Arbitrage Bot</h1>
+            <p>Real-time monitoring of tokenized stock arbitrage opportunities</p>
+            <div class="status" id="status">● LIVE</div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Total Opportunities</h3>
+                <div class="value" id="totalOpps">0</div>
+                <div class="label">All time</div>
+            </div>
+            <div class="stat-card">
+                <h3>Today's Opportunities</h3>
+                <div class="value" id="todayOpps">0</div>
+                <div class="label">Last 24 hours</div>
+            </div>
+            <div class="stat-card">
+                <h3>Average Spread</h3>
+                <div class="value" id="avgSpread">0.00%</div>
+                <div class="label">Across all tokens</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Est. Profit</h3>
+                <div class="value" id="totalProfit">$0.00</div>
+                <div class="label">Potential earnings</div>
+            </div>
+        </div>
+
+        <div id="tokenStats" class="token-stats"></div>
+
+        <div class="controls">
+            <button class="btn btn-primary" onclick="loadData()">🔄 Refresh Data</button>
+            <button class="btn btn-success" onclick="exportData()">📥 Export CSV</button>
+            <button class="btn btn-danger" onclick="clearData()">🗑️ Clear Display</button>
+        </div>
+
+        <div class="filter-bar">
+            <label>Filter by Token:</label>
+            <select id="tokenFilter" onchange="filterOpportunities()">
+                <option value="all">All Tokens</option>
+                <option value="TSLAr">TSLAr (Tesla)</option>
+                <option value="CRCLr">CRCLr (Circle)</option>
+                <option value="SPYr">SPYr (S&P 500)</option>
+                <option value="MSTRr">MSTRr (MicroStrategy)</option>
+                <option value="NVDAr">NVDAr (Nvidia)</option>
+            </select>
+            
+            <label>Min Spread:</label>
+            <select id="spreadFilter" onchange="filterOpportunities()">
+                <option value="0">All</option>
+                <option value="0.5">≥ 0.5%</option>
+                <option value="0.8">≥ 0.8%</option>
+                <option value="1.0">≥ 1.0%</option>
+                <option value="1.5">≥ 1.5%</option>
+                <option value="2.0">≥ 2.0%</option>
+            </select>
+        </div>
+
+        <div class="opportunities-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Token</th>
+                        <th>Remora Price</th>
+                        <th>Oracle Price</th>
+                        <th>Spread</th>
+                        <th>Est. Profit</th>
+                        <th>Direction</th>
+                    </tr>
+                </thead>
+                <tbody id="opportunitiesBody">
+                    <tr>
+                        <td colspan="7" class="loading">
+                            <div class="spinner"></div>
+                            Loading opportunities...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="last-updated" id="lastUpdated"></div>
+    </div>
+
+    <script>
+        let opportunities = [];
+        let allOpportunities = [];
+        let autoRefreshInterval;
+
+        // Load data from API
+        async function loadData() {
+            try {
+                const [oppsResponse, statsResponse] = await Promise.all([
+                    fetch('/api/opportunities'),
+                    fetch('/api/stats')
+                ]);
+
+                const oppsData = await oppsResponse.json();
+                const statsData = await statsResponse.json();
+
+                if (oppsData.success) {
+                    allOpportunities = oppsData.opportunities || [];
+                    opportunities = allOpportunities;
+                    displayOpportunities();
+                }
+
+                if (statsData.success) {
+                    displayStats(statsData.stats);
+                }
+
+                updateLastUpdated();
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('opportunitiesBody').innerHTML = 
+                    '<tr><td colspan="7" class="no-data">Error loading data. Make sure the bot is running.</td></tr>';
+            }
+        }
+
+        // Display statistics
+        function displayStats(stats) {
+            document.getElementById('totalOpps').textContent = stats.totalOpportunities.toLocaleString();
+            document.getElementById('todayOpps').textContent = stats.todayOpportunities.toLocaleString();
+            document.getElementById('avgSpread').textContent = stats.avgSpread.toFixed(2) + '%';
+            document.getElementById('totalProfit').textContent = '$' + stats.totalProfit.toFixed(2);
+
+            // Display token stats
+            if (stats.byToken && Object.keys(stats.byToken).length > 0) {
+                const tokenStatsHtml = Object.entries(stats.byToken).map(([token, data]) => `
+                    <div class="token-card ${token}">
+                        <h4>${token}</h4>
+                        <div class="token-stat">
+                            <span>Opportunities:</span>
+                            <strong>${data.count}</strong>
+                        </div>
+                        <div class="token-stat">
+                            <span>Avg Spread:</span>
+                            <strong>${data.avgSpread.toFixed(2)}%</strong>
+                        </div>
+                        <div class="token-stat">
+                            <span>Max Spread:</span>
+                            <strong>${data.maxSpread.toFixed(2)}%</strong>
+                        </div>
+                        <div class="token-stat">
+                            <span>Total Profit:</span>
+                            <strong class="profit-positive">$${data.totalProfit.toFixed(2)}</strong>
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('tokenStats').innerHTML = tokenStatsHtml;
+            }
+        }
+
+        // Display opportunities
+        function displayOpportunities() {
+            const tbody = document.getElementById('opportunitiesBody');
+            
+            if (opportunities.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="no-data">No opportunities found. Start the bot to collect data.</td></tr>';
+                return;
+            }
+
+            const html = opportunities.map(opp => {
+                const time = new Date(opp.timestamp).toLocaleTimeString();
+                const token = opp.token || 'TSLAr';
+                const spread = Math.abs(opp.spreadPercent || opp.spread || 0);
+                const profit = opp.estimatedProfit || 0;
+                const direction = opp.direction || 'BUY_REMORA';
+                
+                return `
+                    <tr>
+                        <td>${time}</td>
+                        <td><span class="token-badge ${token}">${token}</span></td>
+                        <td>$${(opp.remoraPrice || 0).toFixed(2)}</td>
+                        <td>$${(opp.oraclePrice || opp.pythPrice || 0).toFixed(2)}</td>
+                        <td class="${spread >= 1.0 ? 'spread-high' : ''}">${spread.toFixed(2)}%</td>
+                        <td class="${profit >= 0 ? 'profit-positive' : 'profit-negative'}">$${profit.toFixed(2)}</td>
+                        <td><span class="direction ${direction}">${direction}</span></td>
+                    </tr>
+                `;
+            }).join('');
+
+            tbody.innerHTML = html;
+        }
+
+        // Filter opportunities
+        function filterOpportunities() {
+            const tokenFilter = document.getElementById('tokenFilter').value;
+            const spreadFilter = parseFloat(document.getElementById('spreadFilter').value);
+
+            opportunities = allOpportunities.filter(opp => {
+                const token = opp.token || 'TSLAr';
+                const spread = Math.abs(opp.spreadPercent || opp.spread || 0);
+                
+                const tokenMatch = tokenFilter === 'all' || token === tokenFilter;
+                const spreadMatch = spread >= spreadFilter;
+                
+                return tokenMatch && spreadMatch;
+            });
+
+            displayOpportunities();
+        }
+
+        // Export data as CSV
+        function exportData() {
+            if (allOpportunities.length === 0) {
+                alert('No data to export!');
+                return;
+            }
+
+            const csv = [
+                ['Timestamp', 'Token', 'Remora Price', 'Oracle Price', 'Spread %', 'Est. Profit', 'Direction'],
+                ...allOpportunities.map(opp => [
+                    new Date(opp.timestamp).toISOString(),
+                    opp.token || 'TSLAr',
+                    opp.remoraPrice || 0,
+                    opp.oraclePrice || opp.pythPrice || 0,
+                    Math.abs(opp.spreadPercent || opp.spread || 0),
+                    opp.estimatedProfit || 0,
+                    opp.direction || 'BUY_REMORA'
+                ])
+            ].map(row => row.join(',')).join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `multi-token-opportunities-${Date.now()}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Clear display
+        function clearData() {
+            if (confirm('Clear the displayed data? (This will not delete the actual data files)')) {
+                opportunities = [];
+                allOpportunities = [];
+                displayOpportunities();
+                document.getElementById('totalOpps').textContent = '0';
+                document.getElementById('todayOpps').textContent = '0';
+                document.getElementById('avgSpread').textContent = '0.00%';
+                document.getElementById('totalProfit').textContent = '$0.00';
+                document.getElementById('tokenStats').innerHTML = '';
+            }
+        }
+
+        // Update last updated time
+        function updateLastUpdated() {
+            const now = new Date().toLocaleString();
+            document.getElementById('lastUpdated').textContent = `Last updated: ${now}`;
+        }
+
+        // Auto-refresh every 10 seconds
+        function startAutoRefresh() {
+            autoRefreshInterval = setInterval(loadData, 10000);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+        }
+
+        // Initialize dashboard
+        window.addEventListener('load', () => {
+            loadData();
+            startAutoRefresh();
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', stopAutoRefresh);
+    </script>
+</body>
+</html>
