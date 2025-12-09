@@ -4,6 +4,8 @@ import { FlashTradeClient } from './flashtrade-client';
 import { WalletManager } from './wallet-manager';
 import { logger } from './logger';
 import { config } from '../config/config';
+import { executeFlashTradeSwap, getPythFeedIdForToken } from './flashtrade-swap';
+import BN from 'bn.js';
 
 // Token program IDs for balance checking
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -243,27 +245,44 @@ export class TradeExecutor {
         logger.info(`📊 Oracle price: $${params.oraclePrice.toFixed(2)}`);
         logger.info(`💡 Arbitrage opportunity: Buy at $${buyPrice.toFixed(2)} → Sell at $${params.oraclePrice.toFixed(2)}`);
 
-        // SIMPLIFIED AUTOMATED STRATEGY:
-        // Buy low on Jupiter, wait for price to improve, sell on Jupiter
+        // CROSS-PLATFORM ARBITRAGE STRATEGY:
+        // Buy low on Jupiter → Sell at oracle price on Flash Trade
         
-        logger.info(`💡 Arbitrage Strategy: Buy low → Wait for price convergence → Sell`);
-        logger.info(`   Buy price: $${buyPrice.toFixed(2)}`);
-        logger.info(`   Oracle target: $${params.oraclePrice.toFixed(2)}`);
-        logger.info(`   Spread: ${((params.oraclePrice - buyPrice) / buyPrice * 100).toFixed(2)}%`);
+        logger.info(`💡 Arbitrage Strategy: Buy on Jupiter → Sell on Flash Trade`);
+        logger.info(`   Jupiter buy price: $${buyPrice.toFixed(2)}`);
+        logger.info(`   Flash Trade oracle: $${params.oraclePrice.toFixed(2)}`);
+        logger.info(`   Expected spread: ${((params.oraclePrice - buyPrice) / buyPrice * 100).toFixed(2)}%`);
 
-        // Wait for DEX price to catch up to oracle price
-        logger.info(`⏳ Waiting 10s for DEX price to adjust...`);
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        // Wait for transaction to settle
+        logger.info(`⏳ Waiting 5s for transaction to settle...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // Get updated Jupiter sell quote
-        logger.info(`🔄 Getting updated sell quote from Jupiter...`);
-        const sellResult = await this.jupiterClient.executeSellSwap(
-          params.tokenMint,
-          tokensReceived,
-          keypair,
-          9, // 9 decimals for rTokens
-          100 // 1% slippage for sell
-        );
+        // Get Pyth feed ID for this token
+        const pythFeedId = getPythFeedIdForToken(params.token);
+        if (!pythFeedId) {
+          logger.error(`❌ No Pyth feed ID for ${params.token}`);
+          logger.info(`💡 Tokens held in wallet - sell manually`);
+          return {
+            success: false,
+            signature: swapResult.signature,
+            error: 'No Pyth feed ID',
+            profit: 0
+          };
+        }
+
+        // Execute Flash Trade swap
+        logger.info(`🔄 Selling ${tokensReceived.toFixed(6)} tokens on Flash Trade...`);
+        const tokenAmountLamports = new BN(Math.floor(tokensReceived * 1_000_000_000));
+        const minOutputLamports = new BN(Math.floor((tokensReceived * params.oraclePrice * 0.99) * 1_000_000)); // 1% slippage
+        
+        const sellResult = await executeFlashTradeSwap({
+          connection: this.connection,
+          userKeypair: keypair,
+          inputMint: params.tokenMint,
+          inputAmount: tokenAmountLamports,
+          pythPriceFeedId: pythFeedId,
+          minOutputAmount: minOutputLamports,
+        });
 
         if (!sellResult.success) {
           logger.error(`⚠️  Sell failed: ${sellResult.error}`);
@@ -280,7 +299,7 @@ export class TradeExecutor {
         }
 
         // Calculate actual profit
-        const usdcReceived = sellResult.outputAmount;
+        const usdcReceived = sellResult.outputAmount || 0;
         const usdcSpent = swapResult.inputAmount;
         const actualProfit = usdcReceived - usdcSpent;
         const profitPercent = (actualProfit / usdcSpent) * 100;
