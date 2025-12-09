@@ -26,7 +26,7 @@ export const PYTH_CONFIG = {
   tokens: {
     'rTSLA': 'TSLA/USD',
     'rNVDA': 'NVDA/USD',
-    'rSPY': 'NVDA/USD',
+    'rSPY': 'SPY/USD',
     'rMSTR': 'MSTR/USD',
   },
   
