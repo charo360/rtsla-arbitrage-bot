@@ -5,7 +5,7 @@
 
 import { Connection, PublicKey } from '@solana/web3.js';
 import { AnchorProvider, BN, Wallet } from '@coral-xyz/anchor';
-import { PerpetualsClient, PoolConfig } from 'flash-sdk';
+import { PerpetualsClient, PoolConfig, OraclePrice } from 'flash-sdk';
 import { logger } from './logger';
 
 const FLASH_PROGRAM_ID = new PublicKey('FLASH6Lo6h3iasJKWDs2F8TkW2UKf3s15C8PMGuVfgBn');
@@ -120,6 +120,10 @@ export async function getFlashTradePoolPrice(
       return null;
     }
 
+    // Create OraclePrice instances from the fetched data
+    const usdcOraclePrice = OraclePrice.from(usdcCustodyData.oracle as any);
+    const tokenOraclePrice = OraclePrice.from(tokenCustodyData.oracle as any);
+
     // Amount in USDC (6 decimals)
     const amountIn = new BN(Math.floor(amountUSDC * 1_000_000));
 
@@ -129,11 +133,11 @@ export async function getFlashTradePoolPrice(
       amountIn,
       new BN(0), // amountOut = 0 means calculate it
       poolAccount as any,
-      usdcCustodyData.oracle as any,
-      usdcCustodyData.oracle as any, // Use same for EMA
+      usdcOraclePrice,
+      usdcOraclePrice, // Use same for EMA
       usdcCustodyData as any,
-      tokenCustodyData.oracle as any,
-      tokenCustodyData.oracle as any, // Use same for EMA
+      tokenOraclePrice,
+      tokenOraclePrice, // Use same for EMA
       tokenCustodyData as any,
       poolAccount.maxAumUsd,
       poolConfig
@@ -212,26 +216,32 @@ export async function getFlashTradeSellPrice(
       return null;
     }
 
-    // Debug: Check what we got
-    logger.debug(`Token custody oracle: ${JSON.stringify(tokenCustodyData.oracle)}`);
-    logger.debug(`USDC custody oracle: ${JSON.stringify(usdcCustodyData.oracle)}`);
-    logger.debug(`Pool maxAumUsd: ${poolAccount.maxAumUsd}`);
+    // Create OraclePrice instances from the fetched data
+    logger.debug(`Raw token oracle: ${JSON.stringify(tokenCustodyData.oracle)}`);
+    logger.debug(`Raw USDC oracle: ${JSON.stringify(usdcCustodyData.oracle)}`);
+    
+    const tokenOraclePrice = OraclePrice.from(tokenCustodyData.oracle as any);
+    const usdcOraclePrice = OraclePrice.from(usdcCustodyData.oracle as any);
+    
+    logger.debug(`Token oracle price: ${JSON.stringify({price: tokenOraclePrice.price.toString(), exponent: tokenOraclePrice.exponent.toString()})}`);
+    logger.debug(`USDC oracle price: ${JSON.stringify({price: usdcOraclePrice.price.toString(), exponent: usdcOraclePrice.exponent.toString()})}`);
+
 
     // Amount in tokens (convert to lamports based on decimals)
     const tokenDecimals = tokenCustodyConfig.decimals;
     const amountIn = new BN(Math.floor(tokenAmount * Math.pow(10, tokenDecimals)));
 
     // Get swap amount and fees (selling tokens for USDC)
-    // @ts-ignore
+    // @ts-ignore - Type mismatch between fetched data and SDK types
     const result = client.getSwapAmountAndFeesSync(
       amountIn,
       new BN(0), // amountOut = 0 means calculate it
       poolAccount as any,
-      tokenCustodyData.oracle as any,  // Input is token
-      tokenCustodyData.oracle as any,
+      tokenOraclePrice,  // Input is token
+      tokenOraclePrice,  // Use same for EMA
       tokenCustodyData as any,
-      usdcCustodyData.oracle as any,   // Output is USDC
-      usdcCustodyData.oracle as any,
+      usdcOraclePrice,   // Output is USDC
+      usdcOraclePrice,   // Use same for EMA
       usdcCustodyData as any,
       poolAccount.maxAumUsd,
       poolConfig
