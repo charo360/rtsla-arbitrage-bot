@@ -260,7 +260,8 @@ export class TradeExecutor {
         // Execute Flash Trade SDK swap
         logger.info(`🔄 Selling ${tokensReceived.toFixed(6)} tokens on Flash Trade...`);
         const tokenAmountLamports = new BN(Math.floor(tokensReceived * 1_000_000_000));
-        const minOutputLamports = new BN(Math.floor((tokensReceived * params.oraclePrice * 0.99) * 1_000_000)); // 1% slippage
+        // Flash Trade has fees + price impact, need 3% slippage tolerance
+        const minOutputLamports = new BN(Math.floor((tokensReceived * params.oraclePrice * 0.97) * 1_000_000)); // 3% slippage
         
         let sellResult;
         try {
