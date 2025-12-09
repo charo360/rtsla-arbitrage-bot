@@ -216,15 +216,43 @@ export async function getFlashTradeSellPrice(
       return null;
     }
 
-    // Create OraclePrice instances from the fetched data
-    logger.debug(`Raw token oracle: ${JSON.stringify(tokenCustodyData.oracle)}`);
-    logger.debug(`Raw USDC oracle: ${JSON.stringify(usdcCustodyData.oracle)}`);
+    // The custody data doesn't have cached prices - we need to use the SDK's helper
+    // to get current prices from the oracle accounts. Let's use the ViewHelper from the SDK.
     
-    const tokenOraclePrice = OraclePrice.from(tokenCustodyData.oracle as any);
-    const usdcOraclePrice = OraclePrice.from(usdcCustodyData.oracle as any);
+    // For now, let's just use a simple approach: get the oracle price using the SDK's
+    // built-in methods by wrapping the custody data in CustodyAccount objects
     
-    logger.debug(`Token oracle price: ${JSON.stringify({price: tokenOraclePrice.price.toString(), exponent: tokenOraclePrice.exponent.toString()})}`);
-    logger.debug(`USDC oracle price: ${JSON.stringify({price: usdcOraclePrice.price.toString(), exponent: usdcOraclePrice.exponent.toString()})}`);
+    // Import CustodyAccount from flash-sdk
+    const { CustodyAccount } = require('flash-sdk');
+    
+    // Wrap the fetched data in CustodyAccount objects
+    const tokenCustodyAccount = CustodyAccount.from(
+      tokenCustodyKey,
+      tokenCustodyData as any
+    );
+    const usdcCustodyAccount = CustodyAccount.from(
+      usdcCustodyKey,
+      usdcCustodyData as any
+    );
+    
+    console.log(`✅ Created CustodyAccount objects`);
+    console.log(`Token custody oracle config:`, tokenCustodyAccount.oracle);
+    console.log(`USDC custody oracle config:`, usdcCustodyAccount.oracle);
+    
+    // Now we need oracle prices - access the viewHelper through the client object
+    // @ts-ignore - viewHelper is private but we need it
+    const tokenOraclePrice = await client['viewHelper'].getOraclePrice(
+      tokenCustodyAccount.oracle.intOracleAccount,
+      tokenCustodyAccount.oracle.extOracleAccount
+    );
+    // @ts-ignore
+    const usdcOraclePrice = await client['viewHelper'].getOraclePrice(
+      usdcCustodyAccount.oracle.intOracleAccount,
+      usdcCustodyAccount.oracle.extOracleAccount
+    );
+    
+    console.log(`✅ Token oracle price: $${tokenOraclePrice.toUiPrice(2)}`);
+    console.log(`✅ USDC oracle price: $${usdcOraclePrice.toUiPrice(2)}`);
 
 
     // Amount in tokens (convert to lamports based on decimals)
