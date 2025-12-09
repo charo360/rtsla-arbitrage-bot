@@ -1,5 +1,6 @@
 import { PriceFetcher } from '../utils/price-fetcher';
 import { JupiterClient } from '../utils/jupiter-client';
+import { FlashTradeClient } from '../utils/flashtrade-client';
 import { TradeExecutor } from '../utils/trade-executor';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
@@ -29,6 +30,7 @@ interface TokenOpportunity {
 export class MultiTokenMonitor {
   private priceFetcher: PriceFetcher;
   private jupiterClient: JupiterClient;
+  private flashTradeClient: FlashTradeClient;
   private tradeExecutor: TradeExecutor | null = null;
   private walletManager: WalletManager | null = null;
   private connection: Connection;
@@ -47,6 +49,7 @@ export class MultiTokenMonitor {
     this.priceFetcher = new PriceFetcher();
     this.connection = new Connection(config.rpcUrl, 'confirmed');
     this.jupiterClient = new JupiterClient(this.connection);
+    this.flashTradeClient = new FlashTradeClient({ connection: this.connection });
     this.initializeTokens();
     this.initializeWalletManager();
   }
@@ -205,9 +208,11 @@ export class MultiTokenMonitor {
       stats.totalChecks++;
 
       // Get prices from different sources
-      const [remoraPrice, yahooPrice] = await Promise.all([
+      // CRITICAL: Use actual Flash Trade pool price, not oracle price!
+      const [remoraPrice, yahooPrice, flashPoolPrice] = await Promise.all([
         this.getRemoraPrice(token),
-        this.getYahooPrice(token.yahooSymbol)
+        this.getYahooPrice(token.yahooSymbol),
+        this.flashTradeClient.getActualPoolPrice(token.symbol)
       ]);
 
       if (!remoraPrice || !yahooPrice) {
@@ -215,25 +220,29 @@ export class MultiTokenMonitor {
         return false;
       }
 
-      // Calculate spread
-      const spread = yahooPrice - remoraPrice;
-      const spreadPercent = (spread / yahooPrice) * 100;
+      // Use Flash pool price if available, otherwise fall back to oracle
+      const actualSellPrice = flashPoolPrice || yahooPrice;
+      const priceSource = flashPoolPrice ? 'Flash Pool' : 'Oracle';
+
+      // Calculate spread using ACTUAL execution price
+      const spread = actualSellPrice - remoraPrice;
+      const spreadPercent = (spread / actualSellPrice) * 100;
       const absSpreadPercent = Math.abs(spreadPercent);
 
       // Update stats
       stats.avgSpread = (stats.avgSpread * (stats.totalChecks - 1) + absSpreadPercent) / stats.totalChecks;
       stats.maxSpread = Math.max(stats.maxSpread, absSpreadPercent);
 
-      // Log price info
+      // Log price info with actual execution price
       const direction = spread > 0 ? 'BUY_REMORA' : 'SELL_REMORA';
-      logger.info(`${token.symbol.padEnd(8)} | Remora: $${remoraPrice.toFixed(2).padStart(8)} | Oracle: $${yahooPrice.toFixed(2).padStart(8)} | Spread: ${spreadPercent.toFixed(2).padStart(6)}%`);
+      logger.info(`${token.symbol.padEnd(8)} | Jupiter: $${remoraPrice.toFixed(2).padStart(8)} | ${priceSource}: $${actualSellPrice.toFixed(2).padStart(8)} | Spread: ${spreadPercent.toFixed(2).padStart(6)}%`);
 
       // Check if opportunity exists
       if (absSpreadPercent >= config.minSpreadPercent) {
         const estimatedProfit = this.calculateProfit(
           config.tradeAmountUsdc,
           remoraPrice,
-          yahooPrice,
+          actualSellPrice, // Use actual execution price, not oracle!
           direction
         );
 
@@ -249,7 +258,7 @@ export class MultiTokenMonitor {
             token: token.symbol,
             timestamp: Date.now(),
             remoraPrice,
-            oraclePrice: yahooPrice,
+            oraclePrice: actualSellPrice, // Use actual execution price!
             spread,
             spreadPercent,
             estimatedProfit,

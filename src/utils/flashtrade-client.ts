@@ -3,6 +3,7 @@ import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { logger } from './logger';
 import { PYTH_CONFIG, getFeedId } from '../config/pyth-config';
 import axios from 'axios';
+import { getFlashTradeSellPrice } from './flashtrade-pool-price';
 
 /**
  * Flash.trade Client for Oracle-Priced Spot Swaps
@@ -450,6 +451,28 @@ export class FlashTradeClient {
     } catch (error: any) {
       logger.error(`Error executing arbitrage: ${error.message}`);
       return { success: false };
+    }
+  }
+
+  /**
+   * Get actual Flash Trade pool execution price (not oracle price!)
+   * This returns what you'll ACTUALLY get when selling tokens
+   */
+  async getActualPoolPrice(symbol: string, tokenAmount: number = 0.1): Promise<number | null> {
+    try {
+      const result = await getFlashTradeSellPrice(this.connection, symbol, tokenAmount);
+      
+      if (!result) {
+        logger.warn(`Failed to get pool price for ${symbol}`);
+        return null;
+      }
+
+      logger.debug(`${symbol} pool price: $${result.price.toFixed(2)} (actual execution price)`);
+      return result.price;
+
+    } catch (error: any) {
+      logger.error(`Error getting pool price for ${symbol}: ${error.message}`);
+      return null;
     }
   }
 }
