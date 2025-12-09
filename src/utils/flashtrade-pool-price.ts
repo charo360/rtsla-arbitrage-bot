@@ -152,7 +152,8 @@ export async function getFlashTradePoolPrice(
     };
 
   } catch (error: any) {
-    logger.debug(`Error getting Flash Trade pool price for ${tokenSymbol}: ${error.message}`);
+    logger.error(`Error getting Flash Trade pool price for ${tokenSymbol}: ${error.message}`);
+    logger.error(`Stack: ${error.stack}`);
     return null;
   }
 }
@@ -166,8 +167,90 @@ export async function getFlashTradeSellPrice(
   tokenSymbol: string,
   tokenAmount: number
 ): Promise<{ price: number; usdcOut: number } | null> {
-  // TODO: Implement proper Flash SDK sell price query
-  // For now, return null to fall back to oracle price
-  logger.debug(`Sell price query not yet implemented for ${tokenSymbol}, using oracle price`);
-  return null;
+  try {
+    const client = getFlashClient(connection);
+    const poolConfig = getPoolConfig();
+
+    // Load address lookup table
+    await client.loadAddressLookupTable(poolConfig);
+
+    // Get pool account
+    const poolAccount = await client.getPool(poolConfig.poolName);
+    
+    if (!poolAccount) {
+      logger.error(`Failed to load pool account for ${poolConfig.poolName}`);
+      return null;
+    }
+
+    // Find custody configs
+    const usdcMint = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+    const usdcCustodyConfig = poolConfig.custodies.find((c: any) => 
+      c.mintKey.toString() === usdcMint.toString()
+    );
+
+    const tokenCustodyConfig = poolConfig.custodies.find((c: any) => 
+      c.symbol === tokenSymbol
+    );
+
+    if (!usdcCustodyConfig || !tokenCustodyConfig) {
+      logger.error(`Custody config not found for ${tokenSymbol} or USDC`);
+      return null;
+    }
+
+    // Fetch custody account data
+    const usdcCustodyKey = client.getCustodyKey(poolConfig.poolName, usdcMint);
+    const tokenCustodyKey = client.getCustodyKey(poolConfig.poolName, tokenCustodyConfig.mintKey);
+
+    // @ts-ignore
+    const [usdcCustodyData, tokenCustodyData] = await Promise.all([
+      client.program.account.custody.fetch(usdcCustodyKey),
+      client.program.account.custody.fetch(tokenCustodyKey)
+    ]);
+
+    if (!usdcCustodyData || !tokenCustodyData) {
+      logger.error(`Failed to fetch custody data for ${tokenSymbol}`);
+      return null;
+    }
+
+    // Debug: Check what we got
+    logger.debug(`Token custody oracle: ${JSON.stringify(tokenCustodyData.oracle)}`);
+    logger.debug(`USDC custody oracle: ${JSON.stringify(usdcCustodyData.oracle)}`);
+    logger.debug(`Pool maxAumUsd: ${poolAccount.maxAumUsd}`);
+
+    // Amount in tokens (convert to lamports based on decimals)
+    const tokenDecimals = tokenCustodyConfig.decimals;
+    const amountIn = new BN(Math.floor(tokenAmount * Math.pow(10, tokenDecimals)));
+
+    // Get swap amount and fees (selling tokens for USDC)
+    // @ts-ignore
+    const result = client.getSwapAmountAndFeesSync(
+      amountIn,
+      new BN(0), // amountOut = 0 means calculate it
+      poolAccount as any,
+      tokenCustodyData.oracle as any,  // Input is token
+      tokenCustodyData.oracle as any,
+      tokenCustodyData as any,
+      usdcCustodyData.oracle as any,   // Output is USDC
+      usdcCustodyData.oracle as any,
+      usdcCustodyData as any,
+      poolAccount.maxAumUsd,
+      poolConfig
+    );
+
+    // Convert to human readable (USDC has 6 decimals)
+    const usdcOut = result.minAmountOut.toNumber() / 1_000_000;
+    const price = usdcOut / tokenAmount;
+
+    logger.debug(`Flash Trade sell price for ${tokenSymbol}: $${price.toFixed(2)} (${tokenAmount.toFixed(6)} tokens → $${usdcOut.toFixed(2)})`);
+
+    return {
+      price,
+      usdcOut
+    };
+
+  } catch (error: any) {
+    logger.error(`Error getting Flash Trade sell price for ${tokenSymbol}: ${error.message}`);
+    logger.error(`Stack: ${error.stack}`);
+    return null;
+  }
 }
