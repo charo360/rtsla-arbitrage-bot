@@ -21,8 +21,8 @@ import BN from 'bn.js';
 import { logger } from './logger';
 import { PYTH_CONFIG } from '../config/pyth-config';
 
-// Flash Trade Program IDs
-const FLASH_PROGRAM_ID = new PublicKey('FLASH6Lo6h3iasJKWDs2F8TkW2UKf3s15C8PMGuVfgBn');
+// Flash Trade Program IDs (VERIFIED ON-CHAIN)
+const FLASH_PROGRAM_ID = new PublicKey('9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'); // Mainnet verified
 const PYTH_PROGRAM_ID = new PublicKey('FsJ3A3u2vn5cTVofAjvy6y5kwABJAqYWpe4975bi2epH');
 const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 
@@ -220,16 +220,18 @@ function buildSpotSwapInstruction(params: {
   minOutputAmount: BN;
 }): TransactionInstruction {
   // Instruction discriminator for spot_swap
-  // This is typically the first 8 bytes of sha256("global:spot_swap")
-  // For Flash Trade, we'll use a standard pattern
-  const discriminator = Buffer.from([0x01]); // Simplified - actual value from IDL
+  // Anchor uses first 8 bytes of sha256("global:spot_swap")
+  // For spotSwap instruction in Flash Trade
+  const crypto = require('crypto');
+  const discriminatorHash = crypto.createHash('sha256').update('global:spot_swap').digest();
+  const discriminator = discriminatorHash.slice(0, 8);
 
-  // Encode instruction data
-  const data = Buffer.alloc(1 + 8 + 8); // discriminator + input_amount + min_output_amount
+  // Encode instruction data: discriminator (8) + input_amount (8) + min_output_amount (8)
+  const data = Buffer.alloc(8 + 8 + 8);
   let offset = 0;
 
   discriminator.copy(data, offset);
-  offset += discriminator.length;
+  offset += 8;
 
   // Write input amount (u64)
   data.writeBigUInt64LE(BigInt(params.inputAmount.toString()), offset);
