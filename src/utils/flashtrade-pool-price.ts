@@ -239,17 +239,52 @@ export async function getFlashTradeSellPrice(
     console.log(`Token custody oracle config:`, tokenCustodyAccount.oracle);
     console.log(`USDC custody oracle config:`, usdcCustodyAccount.oracle);
     
-    // Now we need oracle prices - access the viewHelper through the client object
-    // @ts-ignore - viewHelper is private but we need it
-    const tokenOraclePrice = await client['viewHelper'].getOraclePrice(
-      tokenCustodyAccount.oracle.intOracleAccount,
-      tokenCustodyAccount.oracle.extOracleAccount
-    );
-    // @ts-ignore
-    const usdcOraclePrice = await client['viewHelper'].getOraclePrice(
-      usdcCustodyAccount.oracle.intOracleAccount,
-      usdcCustodyAccount.oracle.extOracleAccount
-    );
+    // Fetch Pyth oracle price data directly from the blockchain
+    // The extOracleAccount is the actual Pyth price feed
+    const [tokenPythData, usdcPythData] = await Promise.all([
+      connection.getAccountInfo(tokenCustodyAccount.oracle.extOracleAccount),
+      connection.getAccountInfo(usdcCustodyAccount.oracle.extOracleAccount)
+    ]);
+    
+    if (!tokenPythData || !usdcPythData) {
+      logger.error(`Failed to fetch Pyth oracle data for ${tokenSymbol}`);
+      return null;
+    }
+    
+    console.log(`📏 Token Pyth data size: ${tokenPythData.data.length} bytes`);
+    console.log(`📏 USDC Pyth data size: ${usdcPythData.data.length} bytes`);
+    
+    // Print first 50 bytes to understand the format
+    console.log(`🔍 Token Pyth data (first 50 bytes):`, tokenPythData.data.slice(0, 50).toString('hex'));
+    
+    // This is a compact Pyth format (134 bytes), not the full v2 format (3312 bytes)
+    // Let's try different offsets - compact format likely has price earlier
+    // Try offset 72 (after the 72-byte header we saw earlier)
+    const tokenPrice = tokenPythData.data.readBigInt64LE(72);
+    const tokenExponent = tokenPythData.data.readInt32LE(80);
+    const tokenConfidence = tokenPythData.data.readBigUInt64LE(84);
+    
+    const usdcPrice = usdcPythData.data.readBigInt64LE(72);
+    const usdcExponent = usdcPythData.data.readInt32LE(80);
+    const usdcConfidence = usdcPythData.data.readBigUInt64LE(84);
+    
+    console.log(`🔍 Parsed token price: ${tokenPrice}, exponent: ${tokenExponent}`);
+    console.log(`🔍 Parsed USDC price: ${usdcPrice}, exponent: ${usdcExponent}`);
+    
+    // Create OraclePrice objects
+    const tokenOraclePrice = new OraclePrice({
+      price: new BN(tokenPrice.toString()),
+      exponent: new BN(tokenExponent),
+      confidence: new BN(tokenConfidence.toString()),
+      timestamp: new BN(Date.now() / 1000)
+    });
+    
+    const usdcOraclePrice = new OraclePrice({
+      price: new BN(usdcPrice.toString()),
+      exponent: new BN(usdcExponent),
+      confidence: new BN(usdcConfidence.toString()),
+      timestamp: new BN(Date.now() / 1000)
+    });
     
     console.log(`✅ Token oracle price: $${tokenOraclePrice.toUiPrice(2)}`);
     console.log(`✅ USDC oracle price: $${usdcOraclePrice.toUiPrice(2)}`);
