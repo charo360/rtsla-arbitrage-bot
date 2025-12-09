@@ -135,6 +135,7 @@ export class WalletManager {
       wallet.solBalance = solBalance / LAMPORTS_PER_SOL;
 
       // Get USDC balance (token account)
+      // FIX: Check ALL USDC token accounts, not just the first one
       try {
         logger.debug(`Fetching USDC balance for ${wallet.name}, mint: ${this.usdcMint.toBase58()}`);
         const tokenAccounts = await this.connection.getParsedTokenAccountsByOwner(
@@ -145,9 +146,16 @@ export class WalletManager {
         logger.debug(`Found ${tokenAccounts.value.length} USDC token accounts`);
 
         if (tokenAccounts.value.length > 0) {
-          const usdcAccount = tokenAccounts.value[0].account.data.parsed.info;
-          wallet.usdcBalance = parseFloat(usdcAccount.tokenAmount.uiAmount || '0');
-          logger.debug(`USDC balance: ${wallet.usdcBalance}`);
+          // Sum up USDC across ALL token accounts
+          let totalUSDC = 0;
+          for (const account of tokenAccounts.value) {
+            const usdcAccount = account.account.data.parsed.info;
+            const balance = parseFloat(usdcAccount.tokenAmount.uiAmount || '0');
+            totalUSDC += balance;
+            logger.debug(`  Account ${account.pubkey.toBase58()}: ${balance} USDC`);
+          }
+          wallet.usdcBalance = totalUSDC;
+          logger.debug(`Total USDC balance: ${wallet.usdcBalance}`);
         } else {
           logger.warn(`No USDC token account found for ${wallet.name}`);
           wallet.usdcBalance = 0;
