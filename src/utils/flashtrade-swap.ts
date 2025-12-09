@@ -280,9 +280,10 @@ async function derivePythPriceAccount(feedId: string): Promise<PublicKey> {
   const feedIdBuffer = Buffer.from(cleanFeedId, 'hex');
   
   // Derive PDA using Pyth's standard derivation
+  const pythProgramId = new PublicKey(PYTH_CONFIG.programs.priceFeed);
   const [pda] = PublicKey.findProgramAddressSync(
     [feedIdBuffer],
-    PYTH_CONFIG.programs.priceFeed as any as PublicKey
+    pythProgramId
   );
   
   return pda;
