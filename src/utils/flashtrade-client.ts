@@ -48,19 +48,20 @@ export class FlashTradeClient {
   }
 
   /**
-   * Get quote for selling rToken at oracle price
+   * Get quote for selling rToken at oracle price using Hermes API
+   * This is the NEW method that uses real Pyth prices
    */
   async getSpotSwapQuote(
     inputMint: PublicKey,
     amount: number,
-    pythPriceAccount: PublicKey
+    tokenSymbol: string
   ): Promise<SwapQuote | null> {
     try {
-      // Fetch Pyth oracle price
-      const oraclePrice = await this.getPythPrice(pythPriceAccount);
+      // Fetch Pyth oracle price from Hermes API
+      const oraclePrice = await this.getPythPriceFromHermes(tokenSymbol);
       
       if (!oraclePrice) {
-        logger.warn('Failed to fetch Pyth oracle price');
+        logger.warn(`Failed to fetch Pyth oracle price for ${tokenSymbol}`);
         return null;
       }
 
@@ -76,7 +77,13 @@ export class FlashTradeClient {
       // No price impact on oracle swaps (that's the beauty!)
       const priceImpact = 0;
 
-      logger.debug(`Flash.trade quote: ${inputAmountTokens} tokens → $${outputAfterFee.toFixed(2)} USDC at oracle price $${oraclePrice.toFixed(2)}`);
+      logger.info(`📊 Flash Trade Quote for ${tokenSymbol}:`);
+      logger.info(`   Input: ${inputAmountTokens.toFixed(6)} tokens`);
+      logger.info(`   Oracle Price: $${oraclePrice.toFixed(2)}`);
+      logger.info(`   Output (before fee): $${outputAmountUSDC.toFixed(2)} USDC`);
+      logger.info(`   Fee (0.1%): $${fee.toFixed(2)}`);
+      logger.info(`   Output (after fee): $${outputAfterFee.toFixed(2)} USDC`);
+      logger.info(`   Price Impact: ${priceImpact}% (oracle-based)`);
 
       return {
         inputAmount: amount,
@@ -245,9 +252,17 @@ export class FlashTradeClient {
    */
   getPythFeedId(symbol: string): string | null {
     try {
-      // Normalize symbol to match config (e.g., 'MSTRr' -> 'rMSTR')
+      // Normalize symbol to match config
+      // Input: 'MSTRr', 'TSLAr', etc.
+      // Config expects: 'rMSTR', 'rTSLA', etc.
       let normalizedSymbol = symbol;
-      if (!symbol.startsWith('r')) {
+      
+      // If symbol ends with 'r', move it to the front
+      if (symbol.endsWith('r') || symbol.endsWith('R')) {
+        const base = symbol.slice(0, -1); // Remove trailing 'r'
+        normalizedSymbol = 'r' + base;
+      } else if (!symbol.startsWith('r')) {
+        // If no 'r' at all, add it to the front
         normalizedSymbol = 'r' + symbol;
       }
       
@@ -395,8 +410,8 @@ export class FlashTradeClient {
         return { success: false };
       }
 
-      // Get quote for selling at oracle price
-      const quote = await this.getSpotSwapQuote(tokenMint, Number(tokenAmount), pythAccount);
+      // Get quote for selling at oracle price using Hermes API
+      const quote = await this.getSpotSwapQuote(tokenMint, Number(tokenAmount), symbol);
 
       if (!quote) {
         logger.warn('⚠️  Could not get Flash.trade quote - tokens held in wallet');
