@@ -5,7 +5,7 @@
 
 import { Connection, PublicKey } from '@solana/web3.js';
 import { AnchorProvider, BN, Wallet } from '@coral-xyz/anchor';
-import { PerpetualsClient, PoolConfig, OraclePrice } from 'flash-sdk';
+import { PerpetualsClient, PoolConfig, OraclePrice, CustodyAccount } from 'flash-sdk';
 import { logger } from './logger';
 
 const FLASH_PROGRAM_ID = new PublicKey('FLASH6Lo6h3iasJKWDs2F8TkW2UKf3s15C8PMGuVfgBn');
@@ -120,9 +120,46 @@ export async function getFlashTradePoolPrice(
       return null;
     }
 
-    // Create OraclePrice instances from the fetched data
-    const usdcOraclePrice = OraclePrice.from(usdcCustodyData.oracle as any);
-    const tokenOraclePrice = OraclePrice.from(tokenCustodyData.oracle as any);
+    // Wrap in CustodyAccount objects
+    const usdcCustodyAccount = CustodyAccount.from(usdcCustodyKey, usdcCustodyData as any);
+    const tokenCustodyAccount = CustodyAccount.from(tokenCustodyKey, tokenCustodyData as any);
+
+    // Fetch Pyth oracle price data from external oracle accounts
+    const [usdcPythData, tokenPythData] = await Promise.all([
+      connection.getAccountInfo(usdcCustodyAccount.oracle.extOracleAccount),
+      connection.getAccountInfo(tokenCustodyAccount.oracle.extOracleAccount)
+    ]);
+
+    if (!usdcPythData || !tokenPythData) {
+      logger.error(`Failed to fetch Pyth oracle data for ${tokenSymbol}`);
+      return null;
+    }
+
+    // Parse Pyth compact format (offsets: price=73, exponent=89, confidence=93)
+    const usdcPrice = usdcPythData.data.readBigInt64LE(73);
+    const usdcExponent = usdcPythData.data.readInt32LE(89);
+    const usdcConfidence = usdcPythData.data.readBigUInt64LE(93);
+
+    const tokenPrice = tokenPythData.data.readBigInt64LE(73);
+    const tokenExponent = tokenPythData.data.readInt32LE(89);
+    const tokenConfidence = tokenPythData.data.readBigUInt64LE(93);
+
+    // Create OraclePrice objects
+    const usdcOraclePrice = new OraclePrice({
+      price: new BN(usdcPrice.toString()),
+      exponent: new BN(usdcExponent),
+      confidence: new BN(usdcConfidence.toString()),
+      timestamp: new BN(Date.now() / 1000)
+    });
+
+    const tokenOraclePrice = new OraclePrice({
+      price: new BN(tokenPrice.toString()),
+      exponent: new BN(tokenExponent),
+      confidence: new BN(tokenConfidence.toString()),
+      timestamp: new BN(Date.now() / 1000)
+    });
+
+    logger.debug(`${tokenSymbol} buy - USDC oracle: $${usdcOraclePrice.toUiPrice(2)}, Token oracle: $${tokenOraclePrice.toUiPrice(2)}`);
 
     // Amount in USDC (6 decimals)
     const amountIn = new BN(Math.floor(amountUSDC * 1_000_000));
@@ -135,10 +172,10 @@ export async function getFlashTradePoolPrice(
       poolAccount as any,
       usdcOraclePrice,
       usdcOraclePrice, // Use same for EMA
-      usdcCustodyData as any,
+      usdcCustodyAccount,  // Use CustodyAccount object, not raw data!
       tokenOraclePrice,
       tokenOraclePrice, // Use same for EMA
-      tokenCustodyData as any,
+      tokenCustodyAccount,  // Use CustodyAccount object, not raw data!
       poolAccount.maxAumUsd,
       poolConfig
     );
@@ -222,9 +259,6 @@ export async function getFlashTradeSellPrice(
     // For now, let's just use a simple approach: get the oracle price using the SDK's
     // built-in methods by wrapping the custody data in CustodyAccount objects
     
-    // Import CustodyAccount from flash-sdk
-    const { CustodyAccount } = require('flash-sdk');
-    
     // Wrap the fetched data in CustodyAccount objects
     const tokenCustodyAccount = CustodyAccount.from(
       tokenCustodyKey,
@@ -235,12 +269,9 @@ export async function getFlashTradeSellPrice(
       usdcCustodyData as any
     );
     
-    console.log(`✅ Created CustodyAccount objects`);
-    console.log(`Token custody oracle config:`, tokenCustodyAccount.oracle);
-    console.log(`USDC custody oracle config:`, usdcCustodyAccount.oracle);
     
     // Fetch Pyth oracle price data directly from the blockchain
-    // The extOracleAccount is the actual Pyth price feed
+    // The extOracleAccount is the actual Pyth price feed (compact format, 134 bytes)
     const [tokenPythData, usdcPythData] = await Promise.all([
       connection.getAccountInfo(tokenCustodyAccount.oracle.extOracleAccount),
       connection.getAccountInfo(usdcCustodyAccount.oracle.extOracleAccount)
@@ -251,25 +282,20 @@ export async function getFlashTradeSellPrice(
       return null;
     }
     
-    console.log(`📏 Token Pyth data size: ${tokenPythData.data.length} bytes`);
-    console.log(`📏 USDC Pyth data size: ${usdcPythData.data.length} bytes`);
+    // Pyth compact format structure (134 bytes):
+    // Offset 73: Price (int64, little-endian)
+    // Offset 89: Exponent (int32, little-endian)
+    // Offset 93: Confidence (uint64, little-endian)
+    const tokenPrice = tokenPythData.data.readBigInt64LE(73);
+    const tokenExponent = tokenPythData.data.readInt32LE(89);
+    const tokenConfidence = tokenPythData.data.readBigUInt64LE(93);
     
-    // Print first 50 bytes to understand the format
-    console.log(`🔍 Token Pyth data (first 50 bytes):`, tokenPythData.data.slice(0, 50).toString('hex'));
+    const usdcPrice = usdcPythData.data.readBigInt64LE(73);
+    const usdcExponent = usdcPythData.data.readInt32LE(89);
+    const usdcConfidence = usdcPythData.data.readBigUInt64LE(93);
     
-    // This is a compact Pyth format (134 bytes), not the full v2 format (3312 bytes)
-    // Let's try different offsets - compact format likely has price earlier
-    // Try offset 72 (after the 72-byte header we saw earlier)
-    const tokenPrice = tokenPythData.data.readBigInt64LE(72);
-    const tokenExponent = tokenPythData.data.readInt32LE(80);
-    const tokenConfidence = tokenPythData.data.readBigUInt64LE(84);
-    
-    const usdcPrice = usdcPythData.data.readBigInt64LE(72);
-    const usdcExponent = usdcPythData.data.readInt32LE(80);
-    const usdcConfidence = usdcPythData.data.readBigUInt64LE(84);
-    
-    console.log(`🔍 Parsed token price: ${tokenPrice}, exponent: ${tokenExponent}`);
-    console.log(`🔍 Parsed USDC price: ${usdcPrice}, exponent: ${usdcExponent}`);
+    logger.debug(`Token ${tokenSymbol} oracle: price=${tokenPrice}, exp=${tokenExponent}`);
+    logger.debug(`USDC oracle: price=${usdcPrice}, exp=${usdcExponent}`);
     
     // Create OraclePrice objects
     const tokenOraclePrice = new OraclePrice({
@@ -286,9 +312,8 @@ export async function getFlashTradeSellPrice(
       timestamp: new BN(Date.now() / 1000)
     });
     
-    console.log(`✅ Token oracle price: $${tokenOraclePrice.toUiPrice(2)}`);
-    console.log(`✅ USDC oracle price: $${usdcOraclePrice.toUiPrice(2)}`);
-
+    logger.debug(`${tokenSymbol} oracle price: $${tokenOraclePrice.toUiPrice(2)}`);
+    logger.debug(`USDC oracle price: $${usdcOraclePrice.toUiPrice(2)}`);
 
     // Amount in tokens (convert to lamports based on decimals)
     const tokenDecimals = tokenCustodyConfig.decimals;
@@ -302,10 +327,10 @@ export async function getFlashTradeSellPrice(
       poolAccount as any,
       tokenOraclePrice,  // Input is token
       tokenOraclePrice,  // Use same for EMA
-      tokenCustodyData as any,
+      tokenCustodyAccount,  // Use CustodyAccount object, not raw data!
       usdcOraclePrice,   // Output is USDC
       usdcOraclePrice,   // Use same for EMA
-      usdcCustodyData as any,
+      usdcCustodyAccount,  // Use CustodyAccount object, not raw data!
       poolAccount.maxAumUsd,
       poolConfig
     );

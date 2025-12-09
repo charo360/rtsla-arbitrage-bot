@@ -28,7 +28,7 @@
   "dependencies": {
     "@coral-xyz/anchor": "^0.29.0",
     "@jup-ag/api": "^6.0.47",
-    "@pythnetwork/client": "^2.19.0",
+    "@pythnetwork/client": "^2.22.1",
     "@solana/spl-token": "^0.3.11",
     "@solana/web3.js": "^1.87.6",
     "axios": "^1.6.2",
