@@ -34,6 +34,7 @@ export class MultiTokenMonitor {
   private connection: Connection;
   private tokens: TokenConfig[] = [];
   private opportunities: TokenOpportunity[] = [];
+  private isTrading: boolean = false; // Lock to prevent concurrent trades
   private stats: Map<string, {
     totalChecks: number;
     opportunitiesFound: number;
@@ -258,27 +259,43 @@ export class MultiTokenMonitor {
           this.opportunities.push(opportunity);
           this.saveOpportunities();
 
-          // Execute trade if auto-execute is enabled
+          // Execute trade if auto-execute is enabled and not already trading
           if (this.tradeExecutor && config.autoExecute) {
-            logger.info(`🚀 Executing trade for ${token.symbol}...`);
-            
-            const tradeResult = await this.tradeExecutor.executeTrade({
-              token: token.symbol,
-              tokenMint: new PublicKey(token.mintAddress),
-              direction,
-              amount: config.tradeAmountUsdc,
-              expectedProfit: estimatedProfit,
-              remoraPrice,
-              oraclePrice: yahooPrice,
-              spreadPercent
-            });
+            // Check if already trading - skip if so
+            if (this.isTrading) {
+              logger.info(`⏳ Trade already in progress, skipping ${token.symbol}`);
+              return true;
+            }
 
-            if (tradeResult.success) {
-              logger.info(`✅ Trade executed successfully!`);
-              logger.info(`   Signature: ${tradeResult.signature}`);
-              logger.info(`   Profit: $${tradeResult.profit?.toFixed(2)}`);
-            } else {
-              logger.error(`❌ Trade failed: ${tradeResult.error}`);
+            // Lock trading
+            this.isTrading = true;
+            logger.info(`🔒 Trade lock acquired for ${token.symbol}`);
+
+            try {
+              logger.info(`🚀 Executing trade for ${token.symbol}...`);
+
+              const tradeResult = await this.tradeExecutor.executeTrade({
+                token: token.symbol,
+                tokenMint: new PublicKey(token.mintAddress),
+                direction,
+                amount: config.tradeAmountUsdc,
+                expectedProfit: estimatedProfit,
+                remoraPrice,
+                oraclePrice: yahooPrice,
+                spreadPercent
+              });
+
+              if (tradeResult.success) {
+                logger.info(`✅ Trade executed successfully!`);
+                logger.info(`   Signature: ${tradeResult.signature}`);
+                logger.info(`   Profit: $${tradeResult.profit?.toFixed(2)}`);
+              } else {
+                logger.error(`❌ Trade failed: ${tradeResult.error}`);
+              }
+            } finally {
+              // Always unlock when done
+              this.isTrading = false;
+              logger.info(`🔓 Trade lock released`);
             }
           }
 

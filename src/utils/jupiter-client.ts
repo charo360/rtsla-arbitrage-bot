@@ -1,7 +1,10 @@
 import { Connection, PublicKey, VersionedTransaction, Keypair } from '@solana/web3.js';
-import { createJupiterApiClient, QuoteGetRequest, QuoteResponse, SwapResponse } from '@jup-ag/api';
+import axios from 'axios';
 import { logger } from './logger';
 import { config } from '../config/config';
+
+// Jupiter API base URL - using public API endpoint (quote-api.jup.ag has DNS issues)
+const JUPITER_API_URL = 'https://public.jupiterapi.com';
 
 export interface JupiterQuote {
   inputMint: string;
@@ -23,39 +26,38 @@ export interface SwapResult {
 
 export class JupiterClient {
   private connection: Connection;
-  private jupiterApi: ReturnType<typeof createJupiterApiClient>;
   private usdcMint: PublicKey;
 
   constructor(connection: Connection) {
     this.connection = connection;
-    this.jupiterApi = createJupiterApiClient();
     this.usdcMint = config.tokens.usdc;
   }
 
   /**
    * Get quote for swapping USDC to a token
+   * Uses raw HTTP to preserve all fields including feeAmount
    */
   async getQuote(
     outputMint: PublicKey,
     amountUsdc: number,
     slippageBps: number = 50 // 0.5% default
-  ): Promise<QuoteResponse | null> {
+  ): Promise<any | null> {
     try {
       const amountInLamports = Math.floor(amountUsdc * 1_000_000); // USDC has 6 decimals
 
-      const quoteRequest: QuoteGetRequest = {
+      const params = new URLSearchParams({
         inputMint: this.usdcMint.toBase58(),
         outputMint: outputMint.toBase58(),
-        amount: amountInLamports,
-        slippageBps: slippageBps,
-        onlyDirectRoutes: false,
-        asLegacyTransaction: true,
-        restrictIntermediateTokens: true,
-      };
+        amount: amountInLamports.toString(),
+        slippageBps: slippageBps.toString(),
+        onlyDirectRoutes: 'false',
+        restrictIntermediateTokens: 'true',
+      });
 
       logger.debug(`Requesting Jupiter quote: ${amountUsdc} USDC → ${outputMint.toBase58()}`);
 
-      const quote = await this.jupiterApi.quoteGet(quoteRequest);
+      const response = await axios.get(`${JUPITER_API_URL}/quote?${params.toString()}`);
+      const quote = response.data;
 
       if (!quote) {
         logger.warn(`No quote received from Jupiter for ${outputMint.toBase58()}`);
@@ -76,40 +78,87 @@ export class JupiterClient {
 
   /**
    * Get quote for swapping a token to USDC (reverse)
+   * Uses raw HTTP to preserve all fields including feeAmount
    */
   async getQuoteReverse(
     inputMint: PublicKey,
     amountTokens: number,
-    tokenDecimals: number = 6,
-    slippageBps: number = 50
-  ): Promise<QuoteResponse | null> {
+    tokenDecimals: number = 9, // rTokens use 9 decimals
+    slippageBps: number = 100 // 1% default for sells
+  ): Promise<any | null> {
     try {
       const amountInLamports = Math.floor(amountTokens * Math.pow(10, tokenDecimals));
 
-      const quoteRequest: QuoteGetRequest = {
+      const params = new URLSearchParams({
         inputMint: inputMint.toBase58(),
         outputMint: this.usdcMint.toBase58(),
-        amount: amountInLamports,
-        slippageBps: slippageBps,
-        onlyDirectRoutes: false,
-        asLegacyTransaction: false,
-      };
+        amount: amountInLamports.toString(),
+        slippageBps: slippageBps.toString(),
+        onlyDirectRoutes: 'false',
+        restrictIntermediateTokens: 'true',
+      });
 
       logger.debug(`Requesting Jupiter reverse quote: ${amountTokens} tokens → USDC`);
 
-      const quote = await this.jupiterApi.quoteGet(quoteRequest);
+      const response = await axios.get(`${JUPITER_API_URL}/quote?${params.toString()}`);
+      const quote = response.data;
 
       if (!quote) {
         logger.warn('No reverse quote received from Jupiter');
         return null;
       }
 
-      logger.debug(`Reverse quote received: ${quote.outAmount} USDC`);
+      const usdcOut = parseInt(quote.outAmount) / 1_000_000;
+      logger.debug(`Reverse quote received: ${usdcOut.toFixed(2)} USDC`);
 
       return quote;
     } catch (error: any) {
       logger.error(`Error getting Jupiter reverse quote: ${error.message}`);
+      if (error.response) {
+        logger.error(`Jupiter API response: ${JSON.stringify(error.response.data)}`);
+      }
       return null;
+    }
+  }
+
+  /**
+   * Execute a sell swap (token → USDC) using Jupiter
+   */
+  async executeSellSwap(
+    tokenMint: PublicKey,
+    tokenAmount: number,
+    userKeypair: Keypair,
+    tokenDecimals: number = 9,
+    slippageBps: number = 100
+  ): Promise<SwapResult> {
+    try {
+      logger.info(`🔄 Getting sell quote for ${tokenAmount} tokens...`);
+
+      // Get quote for selling tokens to USDC
+      const quote = await this.getQuoteReverse(tokenMint, tokenAmount, tokenDecimals, slippageBps);
+
+      if (!quote) {
+        throw new Error('Failed to get sell quote from Jupiter');
+      }
+
+      const usdcOut = parseInt(quote.outAmount) / 1_000_000;
+      const priceImpact = parseFloat(quote.priceImpactPct || '0');
+
+      logger.info(`📊 Jupiter Sell Quote:`);
+      logger.info(`   Input: ${tokenAmount} tokens`);
+      logger.info(`   Output: ${usdcOut.toFixed(2)} USDC`);
+      logger.info(`   Price Impact: ${priceImpact.toFixed(2)}%`);
+
+      // Execute the swap
+      return await this.executeSwap(quote, userKeypair);
+    } catch (error: any) {
+      logger.error(`Sell swap failed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message,
+        inputAmount: 0,
+        outputAmount: 0,
+      };
     }
   }
 
@@ -154,52 +203,75 @@ export class JupiterClient {
   }
 
   /**
-   * Execute a swap
+   * Execute a swap using raw HTTP to preserve all quote fields
    */
   async executeSwap(
-    quote: QuoteResponse,
+    quote: any, // Use any to preserve all fields from raw HTTP response
     userKeypair: Keypair,
-    priorityFee: number = 0.0001 // SOL
+    _priorityFee: number = 0.0001 // SOL (unused, using priorityLevelWithMaxLamports instead)
   ): Promise<SwapResult> {
     try {
       logger.info('🔄 Building swap transaction...');
 
-      // Get swap transaction
+      // Get swap transaction using raw HTTP to preserve all quote fields
       let swapResponse;
       try {
-        const swapRequest = {
-          quoteResponse: quote,
+        // Remove platformFee from quote if present (public.jupiterapi.com adds this)
+        // The swap endpoint requires a feeAccount if platformFee is present
+        const cleanQuote = { ...quote };
+        if (cleanQuote.platformFee) {
+          delete cleanQuote.platformFee;
+          logger.debug('Removed platformFee from quote for swap request');
+        }
+
+        // Build swap request with the cleaned quote (preserves feeAmount and other fields)
+        const swapRequestBody = {
+          quoteResponse: cleanQuote, // Quote with platformFee removed
           userPublicKey: userKeypair.publicKey.toBase58(),
           wrapAndUnwrapSol: true,
           dynamicComputeUnitLimit: true,
-          asLegacyTransaction: false,
-          useSharedAccounts: true,
-          destinationTokenAccount: undefined, // Let Jupiter create it
+          prioritizationFeeLamports: {
+            priorityLevelWithMaxLamports: {
+              priorityLevel: 'high',
+              maxLamports: 1000000, // Max 0.001 SOL
+            }
+          },
         };
-        
+
         logger.debug(`Swap request: ${JSON.stringify({
-          userPublicKey: swapRequest.userPublicKey,
+          userPublicKey: swapRequestBody.userPublicKey,
           inputMint: quote.inputMint,
           outputMint: quote.outputMint,
           amount: quote.inAmount,
           slippage: quote.slippageBps
         })}`);
-        
-        swapResponse = await this.jupiterApi.swapPost({
-          swapRequest,
+
+        // Use raw HTTP POST to preserve all fields
+        const response = await axios.post(`${JUPITER_API_URL}/swap`, swapRequestBody, {
+          headers: { 'Content-Type': 'application/json' },
         });
+        swapResponse = response.data;
       } catch (swapError: any) {
         logger.error(`Jupiter swap API error: ${swapError.message}`);
-        logger.error(`Error status: ${swapError.response?.status}`);
-        logger.error(`Error data: ${JSON.stringify(swapError.response?.data)}`);
-        logger.error(`Full error: ${JSON.stringify(swapError, null, 2)}`);
-        
-        // Check if it's a liquidity issue
-        if (swapError.response?.status === 400) {
-          throw new Error(`Jupiter swap failed: Insufficient liquidity or invalid route`);
+
+        // Extract error details from axios error
+        let errorDetails = '';
+        if (swapError.response) {
+          const status = swapError.response.status;
+          logger.error(`Error status: ${status}`);
+          logger.error(`Error data: ${JSON.stringify(swapError.response.data)}`);
+          errorDetails = JSON.stringify(swapError.response.data);
+
+          // Check for specific error codes
+          if (status === 400) {
+            throw new Error(`Jupiter swap failed: Insufficient liquidity or invalid route. ${errorDetails}`);
+          }
+          if (status === 422) {
+            throw new Error(`Jupiter swap failed: Invalid request parameters. ${errorDetails}`);
+          }
         }
-        
-        throw new Error(`Jupiter swap failed: ${swapError.message}`);
+
+        throw new Error(`Jupiter swap failed: ${swapError.message}. ${errorDetails}`);
       }
 
       if (!swapResponse || !swapResponse.swapTransaction) {
@@ -235,9 +307,16 @@ export class JupiterClient {
 
       logger.info(`✅ Transaction confirmed: ${txid}`);
 
-      // Calculate amounts
-      const inputAmount = parseInt(quote.inAmount) / 1_000_000; // USDC decimals
-      const outputAmount = parseInt(quote.outAmount) / 1_000_000; // Assuming 6 decimals
+      // Calculate amounts based on input/output mints
+      // USDC has 6 decimals, rTokens have 9 decimals
+      const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+      // Determine decimals based on mint addresses
+      const inputDecimals = quote.inputMint === USDC_MINT ? 6 : 9;
+      const outputDecimals = quote.outputMint === USDC_MINT ? 6 : 9;
+
+      const inputAmount = parseInt(quote.inAmount) / Math.pow(10, inputDecimals);
+      const outputAmount = parseInt(quote.outAmount) / Math.pow(10, outputDecimals);
 
       return {
         success: true,
@@ -274,7 +353,7 @@ export class JupiterClient {
       logger.info(`Amount: $${amountUsdc} USDC`);
       logger.info(`${'='.repeat(80)}\n`);
 
-      let quote: QuoteResponse | null;
+      let quote: any | null;
 
       if (direction === 'BUY') {
         // Buy token with USDC
@@ -314,7 +393,7 @@ export class JupiterClient {
   /**
    * Get best route info for a swap
    */
-  async getRouteInfo(quote: QuoteResponse): Promise<string> {
+  async getRouteInfo(quote: any): Promise<string> {
     try {
       const routes = quote.routePlan || [];
       const routeNames = routes.map((r: any) => r.swapInfo?.label || 'Unknown').join(' → ');

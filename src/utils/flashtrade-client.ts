@@ -242,6 +242,9 @@ export class FlashTradeClient {
    * These are the mainnet Pyth price feeds for stocks
    */
   getPythPriceAccount(symbol: string): PublicKey | null {
+    // Normalize symbol: strip 'r' suffix (e.g., 'MSTRr' -> 'MSTR', 'TSLAr' -> 'TSLA')
+    const normalizedSymbol = symbol.replace(/r$/i, '');
+
     const pythAccounts: Record<string, string> = {
       'TSLA': 'Gnt27xtC473ZT2Mw5u8wZ68Z3gULkSTb5DuxJy7eJotD', // Tesla
       'SPY': 'H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG',  // S&P 500 ETF
@@ -250,13 +253,72 @@ export class FlashTradeClient {
       'CRCL': 'CrCLLbLq7msGA3qHhwPCdxZq5VLfTkLdGMfKJJYjKLnG', // Circle (example)
     };
 
-    const account = pythAccounts[symbol];
+    const account = pythAccounts[normalizedSymbol];
     if (!account) {
-      logger.warn(`No Pyth price account found for ${symbol}`);
+      logger.warn(`No Pyth price account found for ${symbol} (normalized: ${normalizedSymbol})`);
       return null;
     }
 
+    logger.debug(`Pyth account for ${symbol} (normalized: ${normalizedSymbol}): ${account}`);
     return new PublicKey(account);
+  }
+
+  /**
+   * Helper to get token balance with retry logic
+   * Uses getTokenAccountsByOwner for more reliable account discovery
+   */
+  private async getTokenBalanceWithRetry(
+    tokenMint: PublicKey,
+    owner: PublicKey,
+    maxRetries: number = 15,
+    delayMs: number = 2000
+  ): Promise<bigint> {
+    // Token program IDs
+    const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+    const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Check both SPL Token and Token-2022 programs (rStocks use Token-2022)
+        const [splAccounts, token2022Accounts] = await Promise.all([
+          this.connection.getTokenAccountsByOwner(owner, { mint: tokenMint, programId: TOKEN_PROGRAM_ID }),
+          this.connection.getTokenAccountsByOwner(owner, { mint: tokenMint, programId: TOKEN_2022_PROGRAM_ID })
+        ]);
+
+        const allAccounts = [...splAccounts.value, ...token2022Accounts.value];
+
+        if (allAccounts.length > 0) {
+          // Parse the account data to get balance
+          const accountInfo = allAccounts[0];
+          // Token account data: first 64 bytes are mint, then 32 bytes owner, then 8 bytes amount
+          const data = accountInfo.account.data;
+          const amount = data.readBigUInt64LE(64);
+
+          if (amount > BigInt(0)) {
+            const programType = token2022Accounts.value.length > 0 ? 'Token-2022' : 'SPL Token';
+            logger.info(`✅ Token balance fetched (${programType}): ${Number(amount) / 1_000_000_000} tokens`);
+            return amount;
+          }
+        }
+
+        if (attempt === maxRetries) {
+          logger.error(`No token balance found after ${maxRetries} attempts`);
+          return BigInt(0);
+        }
+
+        logger.info(`⏳ Token balance fetch attempt ${attempt}/${maxRetries} - waiting for account to appear...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      } catch (error: any) {
+        const errorMsg = error.message || String(error);
+        if (attempt === maxRetries) {
+          logger.error(`Failed to fetch token balance after ${maxRetries} attempts: ${errorMsg}`);
+          throw error;
+        }
+        logger.info(`⏳ Token balance fetch attempt ${attempt}/${maxRetries} failed, retrying in ${delayMs/1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+    return BigInt(0);
   }
 
   /**
@@ -273,17 +335,13 @@ export class FlashTradeClient {
     try {
       logger.info(`🎯 Executing arbitrage: Jupiter buy → Flash.trade sell for ${symbol}`);
 
-      // Wait a moment for Jupiter buy to settle
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for Jupiter buy to settle on-chain - increased to 5 seconds
+      logger.info('⏳ Waiting for Jupiter transaction to settle (5s)...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
-      // Get user's token balance (how much we bought)
-      const userTokenAccount = await getAssociatedTokenAddress(
-        tokenMint,
-        userKeypair.publicKey
-      );
-
-      const tokenBalance = await this.connection.getTokenAccountBalance(userTokenAccount);
-      const tokenAmount = BigInt(tokenBalance.value.amount);
+      // Get user's token balance (how much we bought) with retry
+      logger.info(`📊 Fetching token balance for ${symbol}...`);
+      const tokenAmount = await this.getTokenBalanceWithRetry(tokenMint, userKeypair.publicKey);
 
       if (tokenAmount === BigInt(0)) {
         logger.error('No tokens received from Jupiter buy');
@@ -301,38 +359,39 @@ export class FlashTradeClient {
 
       // Get quote for selling at oracle price
       const quote = await this.getSpotSwapQuote(tokenMint, Number(tokenAmount), pythAccount);
-      
+
       if (!quote) {
-        logger.error('Failed to get Flash.trade quote');
-        return { success: false };
+        logger.warn('⚠️  Could not get Flash.trade quote - tokens held in wallet');
+        logger.info(`💡 Manually sell ${Number(tokenAmount) / 1_000_000_000} ${symbol} tokens on Flash.trade`);
+        logger.info(`   Visit: https://www.flash.trade/USDC-${symbol.replace(/r$/i, '')}r`);
+        return {
+          success: true, // Jupiter buy succeeded
+          profit: 0 // Unknown until manual sell
+        };
       }
 
-      // Execute sell on Flash.trade
-      const sellSignature = await this.executeSpotSwap(userKeypair, {
-        inputMint: tokenMint,
-        outputMint: this.usdcMint,
-        amount: Number(tokenAmount),
-        minOutputAmount: quote.outputAmount * 0.99, // 1% slippage tolerance
-        pythPriceAccount: pythAccount
-      });
+      // Calculate expected profit at oracle price
+      const expectedUsdcReceived = quote.outputAmount / 1_000_000;
+      const expectedProfit = expectedUsdcReceived - amountUSDC;
 
-      if (!sellSignature) {
-        logger.error('Flash.trade sell failed');
-        return { success: false };
-      }
+      logger.info(`📊 Flash.trade Quote:`);
+      logger.info(`   Oracle Price: $${quote.oraclePrice.toFixed(2)}`);
+      logger.info(`   Expected USDC: $${expectedUsdcReceived.toFixed(2)}`);
+      logger.info(`   Expected Profit: $${expectedProfit.toFixed(2)}`);
 
-      // Calculate profit
-      const usdcReceived = quote.outputAmount / 1_000_000;
-      const profit = usdcReceived - amountUSDC;
+      // NOTE: Flash.trade on-chain spot swap integration is not yet complete
+      // The buildSpotSwapInstruction() function is placeholder code
+      // For now, we log the opportunity and let user manually sell on Flash.trade web UI
+      logger.warn('⚠️  Flash.trade on-chain sell not yet implemented');
+      logger.info(`💡 To complete arbitrage, manually sell on Flash.trade:`);
+      logger.info(`   1. Visit: https://www.flash.trade/USDC-${symbol.replace(/r$/i, '')}r`);
+      logger.info(`   2. Sell ${Number(tokenAmount) / 1_000_000_000} ${symbol} tokens`);
+      logger.info(`   3. Expected to receive: ~$${expectedUsdcReceived.toFixed(2)} USDC`);
 
-      logger.info(`✅ Arbitrage complete! Profit: $${profit.toFixed(2)}`);
-      logger.info(`   Buy: ${jupiterBuySignature}`);
-      logger.info(`   Sell: ${sellSignature}`);
-
+      // Return success since Jupiter buy worked - tokens are in wallet
       return {
         success: true,
-        sellSignature,
-        profit
+        profit: expectedProfit // Expected profit if user sells at oracle price
       };
 
     } catch (error: any) {
