@@ -365,8 +365,8 @@ export class MultiTokenMonitor {
       const revenue = shares * sellPrice;
       const profit = revenue - tradeAmount;
       
-      // Subtract estimated fees (0.3% trading fees + gas)
-      const fees = tradeAmount * 0.003 + 0.01; // ~$0.01 gas
+      // Subtract estimated fees (Jupiter 0.3% + Flash 0.1% = 0.4% total)
+      const fees = tradeAmount * 0.004; // 0.4% total fees
       return profit - fees;
     } else {
       // Sell on Remora (higher), buy on oracle (lower)
@@ -374,7 +374,7 @@ export class MultiTokenMonitor {
       const revenue = shares * buyPrice;
       const profit = tradeAmount - revenue;
       
-      const fees = tradeAmount * 0.003 + 0.01;
+      const fees = tradeAmount * 0.004; // 0.4% total fees
       return profit - fees;
     }
   }

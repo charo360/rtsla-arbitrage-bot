@@ -4,7 +4,7 @@ import { FlashTradeClient } from './flashtrade-client';
 import { WalletManager } from './wallet-manager';
 import { logger } from './logger';
 import { config } from '../config/config';
-import { executeFlashTradeSwap, getPythFeedIdForToken } from './flashtrade-swap';
+import { executeFlashSDKSwap } from './flashtrade-sdk-swap';
 import BN from 'bn.js';
 
 // Token program IDs for balance checking
@@ -257,35 +257,23 @@ export class TradeExecutor {
         logger.info(`⏳ Waiting 5s for transaction to settle...`);
         await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // Get Pyth feed ID for this token
-        const pythFeedId = getPythFeedIdForToken(params.token);
-        if (!pythFeedId) {
-          logger.error(`❌ No Pyth feed ID for ${params.token}`);
-          logger.info(`💡 Tokens held in wallet - sell manually`);
-          return {
-            success: false,
-            signature: swapResult.signature,
-            error: 'No Pyth feed ID',
-            profit: 0
-          };
-        }
-
-        // Execute Flash Trade swap
+        // Execute Flash Trade SDK swap
         logger.info(`🔄 Selling ${tokensReceived.toFixed(6)} tokens on Flash Trade...`);
         const tokenAmountLamports = new BN(Math.floor(tokensReceived * 1_000_000_000));
         const minOutputLamports = new BN(Math.floor((tokensReceived * params.oraclePrice * 0.99) * 1_000_000)); // 1% slippage
         
-        const sellResult = await executeFlashTradeSwap({
-          connection: this.connection,
-          userKeypair: keypair,
-          inputMint: params.tokenMint,
-          inputAmount: tokenAmountLamports,
-          pythPriceFeedId: pythFeedId,
-          minOutputAmount: minOutputLamports,
-        });
-
-        if (!sellResult.success) {
-          logger.error(`⚠️  Sell failed: ${sellResult.error}`);
+        let sellResult;
+        try {
+          sellResult = await executeFlashSDKSwap({
+            connection: this.connection,
+            userKeypair: keypair,
+            inputTokenSymbol: params.token,  // e.g., "MSTRr"
+            outputTokenSymbol: 'USDC',
+            inputAmount: tokenAmountLamports,
+            minOutputAmount: minOutputLamports,
+          });
+        } catch (error: any) {
+          logger.error(`⚠️  Sell failed: ${error.message}`);
           logger.info(`💡 Tokens held in wallet. Options:`);
           logger.info(`   1. Sell manually on Jupiter: https://jup.ag/`);
           logger.info(`   2. Sell on Flash Trade: https://www.flash.trade/USDC-${params.token.replace(/r$/i, '')}r`);
@@ -293,7 +281,7 @@ export class TradeExecutor {
           return {
             success: false,
             signature: swapResult.signature,
-            error: `Sell failed: ${sellResult.error}`,
+            error: `Sell failed: ${error.message}`,
             profit: 0
           };
         }
