@@ -1,6 +1,8 @@
-import { Connection, PublicKey, Transaction, TransactionInstruction, Keypair } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from '@solana/spl-token';
+import { Connection, PublicKey, Transaction, TransactionInstruction, Keypair, sendAndConfirmTransaction } from '@solana/web3.js';
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { logger } from './logger';
+import { PYTH_CONFIG, getFeedId } from '../config/pyth-config';
+import axios from 'axios';
 
 /**
  * Flash.trade Client for Oracle-Priced Spot Swaps
@@ -238,29 +240,65 @@ export class FlashTradeClient {
   }
 
   /**
-   * Get Pyth price account for a symbol
-   * These are the mainnet Pyth price feeds for stocks
+   * Get Pyth price feed ID for a token symbol
+   * Uses the new Pyth Hermes API configuration
    */
-  getPythPriceAccount(symbol: string): PublicKey | null {
-    // Normalize symbol: strip 'r' suffix (e.g., 'MSTRr' -> 'MSTR', 'TSLAr' -> 'TSLA')
-    const normalizedSymbol = symbol.replace(/r$/i, '');
-
-    const pythAccounts: Record<string, string> = {
-      'TSLA': 'Gnt27xtC473ZT2Mw5u8wZ68Z3gULkSTb5DuxJy7eJotD', // Tesla
-      'SPY': 'H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG',  // S&P 500 ETF
-      'NVDA': 'BkN8hYgRjhyH5WNBQfDV8K3G4vXhVRKJYzHvYJFjJVhL', // Nvidia
-      'MSTR': '3m1y5h2uv7EQL3KaJZehvAJa4yDNvgc5yAdL9KPMKwvk', // MicroStrategy
-      'CRCL': 'CrCLLbLq7msGA3qHhwPCdxZq5VLfTkLdGMfKJJYjKLnG', // Circle (example)
-    };
-
-    const account = pythAccounts[normalizedSymbol];
-    if (!account) {
-      logger.warn(`No Pyth price account found for ${symbol} (normalized: ${normalizedSymbol})`);
+  getPythFeedId(symbol: string): string | null {
+    try {
+      // Normalize symbol to match config (e.g., 'MSTRr' -> 'rMSTR')
+      let normalizedSymbol = symbol;
+      if (!symbol.startsWith('r')) {
+        normalizedSymbol = 'r' + symbol;
+      }
+      
+      const feedId = getFeedId(normalizedSymbol);
+      logger.debug(`Pyth feed ID for ${symbol}: ${feedId}`);
+      return feedId;
+    } catch (error: any) {
+      logger.warn(`No Pyth feed ID found for ${symbol}: ${error.message}`);
       return null;
     }
+  }
 
-    logger.debug(`Pyth account for ${symbol} (normalized: ${normalizedSymbol}): ${account}`);
-    return new PublicKey(account);
+  /**
+   * Fetch price from Pyth Hermes API
+   * This is the new recommended way to get Pyth prices
+   */
+  async getPythPriceFromHermes(symbol: string): Promise<number | null> {
+    try {
+      const feedId = this.getPythFeedId(symbol);
+      if (!feedId) {
+        return null;
+      }
+
+      const url = `${PYTH_CONFIG.hermesUrl}/api/latest_price_feeds?ids[]=${feedId}`;
+      const response = await axios.get(url);
+      
+      if (!response.data || response.data.length === 0) {
+        logger.warn(`No price data returned from Hermes for ${symbol}`);
+        return null;
+      }
+
+      const priceData = response.data[0];
+      const price = parseFloat(priceData.price.price);
+      const expo = priceData.price.expo;
+      const actualPrice = price * Math.pow(10, expo);
+      
+      logger.debug(`Pyth Hermes price for ${symbol}: $${actualPrice.toFixed(2)}`);
+      return actualPrice;
+    } catch (error: any) {
+      logger.error(`Error fetching Pyth price from Hermes for ${symbol}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Legacy method - kept for backwards compatibility
+   * Now returns null since we use Hermes API instead
+   */
+  getPythPriceAccount(symbol: string): PublicKey | null {
+    logger.warn(`getPythPriceAccount is deprecated - use getPythPriceFromHermes instead`);
+    return null;
   }
 
   /**
