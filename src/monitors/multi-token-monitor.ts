@@ -106,14 +106,15 @@ export class MultiTokenMonitor {
       });
     }
 
-    if (config.tokens.rCRCL) {
-      this.tokens.push({
-        symbol: 'CRCLr',
-        name: 'Circle',
-        mintAddress: config.tokens.rCRCL.toString(),
-        yahooSymbol: 'CRCL'
-      });
-    }
+    // DISABLED: CRCLr has insufficient liquidity - sells fail with error 0x1788
+    // if (config.tokens.rCRCL) {
+    //   this.tokens.push({
+    //     symbol: 'CRCLr',
+    //     name: 'Circle',
+    //     mintAddress: config.tokens.rCRCL.toString(),
+    //     yahooSymbol: 'CRCL'
+    //   });
+    // }
 
     if (config.tokens.rSPY) {
       this.tokens.push({

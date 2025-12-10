@@ -10,7 +10,7 @@ const STUCK_TOKENS = [
   {
     symbol: 'CRCLr',
     mint: '5fKr9joRHpioriGmMgRVFdmZge8EVUTbrWyxDVdSrcuG',
-    amount: 0.227757,
+    amount: 0.458844,
   },
 ];
 
