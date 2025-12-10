@@ -4,7 +4,7 @@ package-lock.json
 yarn.lock
 
 # Build output
-dist/
+# dist/ - commented out for Railway deployment (Railway will build)
 build/
 *.tsbuildinfo
 
