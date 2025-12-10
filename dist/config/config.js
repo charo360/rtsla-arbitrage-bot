@@ -40,14 +40,21 @@ exports.config = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
 const web3_js_1 = require("@solana/web3.js");
 const path = __importStar(require("path"));
-// Load environment variables
-dotenv_1.default.config();
+// Load environment variables from .env file if it exists (for local development)
+// Railway and other platforms inject env vars directly, so this is optional
+dotenv_1.default.config({ path: path.join(__dirname, '../../.env') });
 function loadConfig() {
+    // Debug: Log environment variable status
+    console.log('🔍 Checking wallet environment variables...');
+    console.log(`   WALLET_PRIVATE_KEY: ${process.env.WALLET_PRIVATE_KEY ? 'SET (length: ' + process.env.WALLET_PRIVATE_KEY.length + ')' : 'NOT SET'}`);
+    console.log(`   WALLET_PRIVATE_KEYS: ${process.env.WALLET_PRIVATE_KEYS ? 'SET' : 'NOT SET'}`);
+    console.log(`   WALLET_1: ${process.env.WALLET_1 ? 'SET (length: ' + process.env.WALLET_1.length + ')' : 'NOT SET'}`);
     // Parse multiple wallets if provided
     let walletPrivateKeys = [];
     // Check for multiple wallets (comma-separated or individual env vars)
     if (process.env.WALLET_PRIVATE_KEYS) {
         // Comma-separated list
+        console.log('   Using WALLET_PRIVATE_KEYS (comma-separated)');
         walletPrivateKeys = process.env.WALLET_PRIVATE_KEYS
             .split(',')
             .map(key => key.trim())
@@ -57,12 +64,14 @@ function loadConfig() {
         // Check for individual wallet env vars (WALLET_1, WALLET_2, etc.)
         let i = 1;
         while (process.env[`WALLET_${i}`]) {
+            console.log(`   Found WALLET_${i}`);
             walletPrivateKeys.push(process.env[`WALLET_${i}`]);
             i++;
         }
     }
     // Fallback to single wallet if no multiple wallets found
     if (walletPrivateKeys.length === 0 && process.env.WALLET_PRIVATE_KEY) {
+        console.log('   Using WALLET_PRIVATE_KEY');
         walletPrivateKeys = [process.env.WALLET_PRIVATE_KEY];
     }
     // Validate wallets
