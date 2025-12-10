@@ -2,8 +2,9 @@ import dotenv from 'dotenv';
 import { PublicKey } from '@solana/web3.js';
 import * as path from 'path';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables from .env file if it exists (for local development)
+// Railway and other platforms inject env vars directly, so this is optional
+dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 export interface Config {
   // Network
@@ -75,12 +76,19 @@ export interface Config {
 }
 
 function loadConfig(): Config {
+  // Debug: Log environment variable status
+  console.log('🔍 Checking wallet environment variables...');
+  console.log(`   WALLET_PRIVATE_KEY: ${process.env.WALLET_PRIVATE_KEY ? 'SET (length: ' + process.env.WALLET_PRIVATE_KEY.length + ')' : 'NOT SET'}`);
+  console.log(`   WALLET_PRIVATE_KEYS: ${process.env.WALLET_PRIVATE_KEYS ? 'SET' : 'NOT SET'}`);
+  console.log(`   WALLET_1: ${process.env.WALLET_1 ? 'SET (length: ' + process.env.WALLET_1.length + ')' : 'NOT SET'}`);
+  
   // Parse multiple wallets if provided
   let walletPrivateKeys: string[] = [];
   
   // Check for multiple wallets (comma-separated or individual env vars)
   if (process.env.WALLET_PRIVATE_KEYS) {
     // Comma-separated list
+    console.log('   Using WALLET_PRIVATE_KEYS (comma-separated)');
     walletPrivateKeys = process.env.WALLET_PRIVATE_KEYS
       .split(',')
       .map(key => key.trim())
@@ -89,6 +97,7 @@ function loadConfig(): Config {
     // Check for individual wallet env vars (WALLET_1, WALLET_2, etc.)
     let i = 1;
     while (process.env[`WALLET_${i}`]) {
+      console.log(`   Found WALLET_${i}`);
       walletPrivateKeys.push(process.env[`WALLET_${i}`]!);
       i++;
     }
@@ -96,6 +105,7 @@ function loadConfig(): Config {
   
   // Fallback to single wallet if no multiple wallets found
   if (walletPrivateKeys.length === 0 && process.env.WALLET_PRIVATE_KEY) {
+    console.log('   Using WALLET_PRIVATE_KEY');
     walletPrivateKeys = [process.env.WALLET_PRIVATE_KEY];
   }
   

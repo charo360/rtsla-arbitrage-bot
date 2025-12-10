@@ -1,6 +1,5 @@
 import { PriceFetcher } from '../utils/price-fetcher';
 import { JupiterClient } from '../utils/jupiter-client';
-import { FlashTradeClient } from '../utils/flashtrade-client';
 import { TradeExecutor } from '../utils/trade-executor';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
@@ -30,7 +29,6 @@ interface TokenOpportunity {
 export class MultiTokenMonitor {
   private priceFetcher: PriceFetcher;
   private jupiterClient: JupiterClient;
-  private flashTradeClient: FlashTradeClient;
   private tradeExecutor: TradeExecutor | null = null;
   private walletManager: WalletManager | null = null;
   private connection: Connection;
@@ -49,7 +47,6 @@ export class MultiTokenMonitor {
     this.priceFetcher = new PriceFetcher();
     this.connection = new Connection(config.rpcUrl, 'confirmed');
     this.jupiterClient = new JupiterClient(this.connection);
-    this.flashTradeClient = new FlashTradeClient({ connection: this.connection });
     this.initializeTokens();
     this.initializeWalletManager();
   }
@@ -109,14 +106,15 @@ export class MultiTokenMonitor {
       });
     }
 
-    if (config.tokens.rCRCL) {
-      this.tokens.push({
-        symbol: 'CRCLr',
-        name: 'Circle',
-        mintAddress: config.tokens.rCRCL.toString(),
-        yahooSymbol: 'CRCL'
-      });
-    }
+    // DISABLED: CRCLr has insufficient liquidity - sells fail with error 0x1788
+    // if (config.tokens.rCRCL) {
+    //   this.tokens.push({
+    //     symbol: 'CRCLr',
+    //     name: 'Circle',
+    //     mintAddress: config.tokens.rCRCL.toString(),
+    //     yahooSymbol: 'CRCL'
+    //   });
+    // }
 
     if (config.tokens.rSPY) {
       this.tokens.push({
@@ -208,41 +206,35 @@ export class MultiTokenMonitor {
       stats.totalChecks++;
 
       // Get prices from different sources
-      // CRITICAL: Use actual Flash Trade pool price, not oracle price!
-      const [remoraPrice, yahooPrice, flashPoolPrice] = await Promise.all([
+      const [remoraPrice, yahooPrice] = await Promise.all([
         this.getRemoraPrice(token),
-        this.getYahooPrice(token.yahooSymbol),
-        this.flashTradeClient.getActualPoolPrice(token.symbol)
+        this.getYahooPrice(token.yahooSymbol)
       ]);
 
       if (!remoraPrice || !yahooPrice) {
-        logger.debug(`${token.symbol}: Unable to fetch prices`);
+        logger.warn(`${token.symbol}: Unable to fetch prices - Remora: ${remoraPrice}, Yahoo: ${yahooPrice}`);
         return false;
       }
 
-      // Use Flash pool price if available, otherwise fall back to oracle
-      const actualSellPrice = flashPoolPrice || yahooPrice;
-      const priceSource = flashPoolPrice ? 'Flash Pool' : 'Oracle';
-
-      // Calculate spread using ACTUAL execution price
-      const spread = actualSellPrice - remoraPrice;
-      const spreadPercent = (spread / actualSellPrice) * 100;
+      // Calculate spread
+      const spread = yahooPrice - remoraPrice;
+      const spreadPercent = (spread / yahooPrice) * 100;
       const absSpreadPercent = Math.abs(spreadPercent);
 
       // Update stats
       stats.avgSpread = (stats.avgSpread * (stats.totalChecks - 1) + absSpreadPercent) / stats.totalChecks;
       stats.maxSpread = Math.max(stats.maxSpread, absSpreadPercent);
 
-      // Log price info with actual execution price
+      // Log price info
       const direction = spread > 0 ? 'BUY_REMORA' : 'SELL_REMORA';
-      logger.info(`${token.symbol.padEnd(8)} | Jupiter: $${remoraPrice.toFixed(2).padStart(8)} | ${priceSource}: $${actualSellPrice.toFixed(2).padStart(8)} | Spread: ${spreadPercent.toFixed(2).padStart(6)}%`);
+      console.log(`${token.symbol.padEnd(8)} | Remora: $${remoraPrice.toFixed(2).padStart(8)} | Oracle: $${yahooPrice.toFixed(2).padStart(8)} | Spread: ${spreadPercent.toFixed(2).padStart(6)}%`);
 
       // Check if opportunity exists
       if (absSpreadPercent >= config.minSpreadPercent) {
         const estimatedProfit = this.calculateProfit(
           config.tradeAmountUsdc,
           remoraPrice,
-          actualSellPrice, // Use actual execution price, not oracle!
+          yahooPrice,
           direction
         );
 
@@ -258,7 +250,7 @@ export class MultiTokenMonitor {
             token: token.symbol,
             timestamp: Date.now(),
             remoraPrice,
-            oraclePrice: actualSellPrice, // Use actual execution price!
+            oraclePrice: yahooPrice,
             spread,
             spreadPercent,
             estimatedProfit,
@@ -353,11 +345,18 @@ export class MultiTokenMonitor {
       );
 
       const result = response.data?.chart?.result?.[0];
-      if (!result) return null;
+      if (!result) {
+        logger.warn(`No Yahoo data for ${symbol}`);
+        return null;
+      }
 
       const price = result.meta?.regularMarketPrice;
+      if (!price) {
+        logger.warn(`No price in Yahoo data for ${symbol}`);
+      }
       return price || null;
-    } catch (error) {
+    } catch (error: any) {
+      logger.error(`Yahoo API error for ${symbol}: ${error.message}`);
       return null;
     }
   }
@@ -374,8 +373,8 @@ export class MultiTokenMonitor {
       const revenue = shares * sellPrice;
       const profit = revenue - tradeAmount;
       
-      // Subtract estimated fees (Jupiter 0.3% + Flash 0.1% = 0.4% total)
-      const fees = tradeAmount * 0.004; // 0.4% total fees
+      // Subtract estimated fees (0.3% trading fees + gas)
+      const fees = tradeAmount * 0.003 + 0.01; // ~$0.01 gas
       return profit - fees;
     } else {
       // Sell on Remora (higher), buy on oracle (lower)
@@ -383,7 +382,7 @@ export class MultiTokenMonitor {
       const revenue = shares * buyPrice;
       const profit = tradeAmount - revenue;
       
-      const fees = tradeAmount * 0.004; // 0.4% total fees
+      const fees = tradeAmount * 0.003 + 0.01;
       return profit - fees;
     }
   }

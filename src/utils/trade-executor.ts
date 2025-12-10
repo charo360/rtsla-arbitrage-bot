@@ -4,8 +4,6 @@ import { FlashTradeClient } from './flashtrade-client';
 import { WalletManager } from './wallet-manager';
 import { logger } from './logger';
 import { config } from '../config/config';
-import { executeFlashSDKSwap } from './flashtrade-sdk-swap';
-import BN from 'bn.js';
 
 // Token program IDs for balance checking
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -245,36 +243,128 @@ export class TradeExecutor {
         logger.info(`📊 Oracle price: $${params.oraclePrice.toFixed(2)}`);
         logger.info(`💡 Arbitrage opportunity: Buy at $${buyPrice.toFixed(2)} → Sell at $${params.oraclePrice.toFixed(2)}`);
 
-        // CROSS-PLATFORM ARBITRAGE STRATEGY:
-        // Buy low on Jupiter → Sell at oracle price on Flash Trade
+        // PROPER CONVERGENCE STRATEGY:
+        // Buy low on Jupiter, monitor continuously, sell when profitable
         
-        logger.info(`💡 Arbitrage Strategy: Buy on Jupiter → Sell on Flash Trade`);
-        logger.info(`   Jupiter buy price: $${buyPrice.toFixed(2)}`);
-        logger.info(`   Flash Trade oracle: $${params.oraclePrice.toFixed(2)}`);
-        logger.info(`   Expected spread: ${((params.oraclePrice - buyPrice) / buyPrice * 100).toFixed(2)}%`);
+        logger.info(`💡 Convergence Strategy: Buy low → Monitor → Sell when profitable`);
+        logger.info(`   Entry price: $${buyPrice.toFixed(2)}`);
+        logger.info(`   Oracle target: $${params.oraclePrice.toFixed(2)}`);
+        logger.info(`   Initial spread: ${((params.oraclePrice - buyPrice) / buyPrice * 100).toFixed(2)}%`);
 
-        // Wait for transaction to settle
-        logger.info(`⏳ Waiting 5s for transaction to settle...`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        // Execute Flash Trade SDK swap
-        logger.info(`🔄 Selling ${tokensReceived.toFixed(6)} tokens on Flash Trade...`);
-        const tokenAmountLamports = new BN(Math.floor(tokensReceived * 1_000_000_000));
-        // Flash Trade has fees + price impact, need 3% slippage tolerance
-        const minOutputLamports = new BN(Math.floor((tokensReceived * params.oraclePrice * 0.97) * 1_000_000)); // 3% slippage
+        // CONVERGENCE MONITORING LOOP (2-10 minutes)
+        const entryTime = Date.now();
+        const MIN_HOLD_TIME = 120;  // 2 minutes minimum
+        const MAX_HOLD_TIME = 600;  // 10 minutes maximum
+        const CHECK_INTERVAL = 15;  // Check every 15 seconds
+        const TAKE_PROFIT = 0.008;  // 0.8% profit target
+        const STOP_LOSS = -0.005;   // -0.5% stop loss
         
+        logger.info(`\n📊 MONITORING POSITION:`);
+        logger.info(`   Min hold: ${MIN_HOLD_TIME}s (${(MIN_HOLD_TIME/60).toFixed(1)} min)`);
+        logger.info(`   Max hold: ${MAX_HOLD_TIME}s (${(MAX_HOLD_TIME/60).toFixed(1)} min)`);
+        logger.info(`   Check interval: ${CHECK_INTERVAL}s`);
+        logger.info(`   Take profit: ${(TAKE_PROFIT*100).toFixed(1)}%`);
+        logger.info(`   No stop loss - waiting for convergence\n`);
+
         let sellResult;
-        try {
-          sellResult = await executeFlashSDKSwap({
-            connection: this.connection,
-            userKeypair: keypair,
-            inputTokenSymbol: params.token,  // e.g., "MSTRr"
-            outputTokenSymbol: 'USDC',
-            inputAmount: tokenAmountLamports,
-            minOutputAmount: minOutputLamports,
-          });
-        } catch (error: any) {
-          logger.error(`⚠️  Sell failed: ${error.message}`);
+        let checkCount = 0;
+        let failedQuotes = 0;
+        const MAX_FAILED_QUOTES = 5;
+        
+        // Wait minimum hold time before first check to avoid immediate stop loss from spread
+        logger.info(`⏳ Waiting ${MIN_HOLD_TIME}s before first price check...`);
+        await new Promise(resolve => setTimeout(resolve, MIN_HOLD_TIME * 1000));
+        
+        while (true) {
+          checkCount++;
+          const holdTime = (Date.now() - entryTime) / 1000;
+          
+          // Wait between checks (except first check, already waited MIN_HOLD_TIME)
+          if (checkCount > 1) {
+            await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL * 1000));
+          }
+          
+          // Get current sell quote (token → USDC)
+          const currentQuote = await this.jupiterClient.getQuoteReverse(
+            params.tokenMint,
+            tokensReceived,
+            9, // 9 decimals for rTokens
+            100 // 1% slippage
+          );
+          
+          if (!currentQuote) {
+            failedQuotes++;
+            logger.warn(`⚠️ Failed to get sell quote (${failedQuotes}/${MAX_FAILED_QUOTES}), retrying...`);
+            
+            // If too many failed quotes, exit with emergency sell attempt
+            if (failedQuotes >= MAX_FAILED_QUOTES) {
+              logger.error(`❌ Too many failed quotes, attempting emergency sell...`);
+              sellResult = await this.jupiterClient.executeSellSwap(
+                params.tokenMint,
+                tokensReceived,
+                keypair,
+                9,
+                500 // 5% slippage for emergency
+              );
+              break;
+            }
+            continue;
+          }
+          
+          // Reset failed quote counter on success
+          failedQuotes = 0;
+          
+          // Calculate current sell price and profit
+          const usdcOut = parseInt(currentQuote.outAmount) / 1_000_000;
+          const currentSellPrice = usdcOut / tokensReceived;
+          const profit = (usdcOut - buyPrice * tokensReceived) / (buyPrice * tokensReceived);
+          const profitUSD = usdcOut - (buyPrice * tokensReceived);
+          
+          logger.info(`[${holdTime.toFixed(0)}s] Check #${checkCount}: Price $${currentSellPrice.toFixed(2)} | Profit: ${(profit*100).toFixed(2)}% ($${profitUSD.toFixed(2)})`);
+          
+          // EXIT CONDITION 1: Take Profit
+          if (profit >= TAKE_PROFIT && holdTime >= MIN_HOLD_TIME) {
+            logger.info(`\n✅ TAKE PROFIT: ${(profit*100).toFixed(2)}% profit reached!`);
+            sellResult = await this.jupiterClient.executeSellSwap(
+              params.tokenMint,
+              tokensReceived,
+              keypair,
+              9,
+              100
+            );
+            break;
+          }
+          
+          // EXIT CONDITION 2: Maximum Hold Time
+          if (holdTime >= MAX_HOLD_TIME) {
+            logger.info(`\n⏰ MAX HOLD TIME: ${(holdTime/60).toFixed(1)} minutes - exiting position`);
+            logger.info(`   Final profit: ${(profit*100).toFixed(2)}%`);
+            sellResult = await this.jupiterClient.executeSellSwap(
+              params.tokenMint,
+              tokensReceived,
+              keypair,
+              9,
+              100
+            );
+            break;
+          }
+          
+          // EXIT CONDITION 3: Minimum hold time met + any positive profit
+          if (holdTime >= MIN_HOLD_TIME && profit > 0.002) {
+            logger.info(`\n💰 PROFITABLE EXIT: ${(profit*100).toFixed(2)}% profit after ${(holdTime/60).toFixed(1)} min`);
+            sellResult = await this.jupiterClient.executeSellSwap(
+              params.tokenMint,
+              tokensReceived,
+              keypair,
+              9,
+              100
+            );
+            break;
+          }
+        }
+
+        if (!sellResult.success) {
+          logger.error(`⚠️  Sell failed: ${sellResult.error}`);
           logger.info(`💡 Tokens held in wallet. Options:`);
           logger.info(`   1. Sell manually on Jupiter: https://jup.ag/`);
           logger.info(`   2. Sell on Flash Trade: https://www.flash.trade/USDC-${params.token.replace(/r$/i, '')}r`);
@@ -282,13 +372,13 @@ export class TradeExecutor {
           return {
             success: false,
             signature: swapResult.signature,
-            error: `Sell failed: ${error.message}`,
+            error: `Sell failed: ${sellResult.error}`,
             profit: 0
           };
         }
 
         // Calculate actual profit
-        const usdcReceived = sellResult.outputAmount || 0;
+        const usdcReceived = sellResult.outputAmount;
         const usdcSpent = swapResult.inputAmount;
         const actualProfit = usdcReceived - usdcSpent;
         const profitPercent = (actualProfit / usdcSpent) * 100;

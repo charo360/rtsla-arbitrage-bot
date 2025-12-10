@@ -1,0 +1,165 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.config = void 0;
+const dotenv_1 = __importDefault(require("dotenv"));
+const web3_js_1 = require("@solana/web3.js");
+const path = __importStar(require("path"));
+// Load environment variables from .env file if it exists (for local development)
+// Railway and other platforms inject env vars directly, so this is optional
+dotenv_1.default.config({ path: path.join(__dirname, '../../.env') });
+function loadConfig() {
+    // Debug: Log environment variable status
+    console.log('🔍 Checking wallet environment variables...');
+    console.log(`   WALLET_PRIVATE_KEY: ${process.env.WALLET_PRIVATE_KEY ? 'SET (length: ' + process.env.WALLET_PRIVATE_KEY.length + ')' : 'NOT SET'}`);
+    console.log(`   WALLET_PRIVATE_KEYS: ${process.env.WALLET_PRIVATE_KEYS ? 'SET' : 'NOT SET'}`);
+    console.log(`   WALLET_1: ${process.env.WALLET_1 ? 'SET (length: ' + process.env.WALLET_1.length + ')' : 'NOT SET'}`);
+    // Parse multiple wallets if provided
+    let walletPrivateKeys = [];
+    // Check for multiple wallets (comma-separated or individual env vars)
+    if (process.env.WALLET_PRIVATE_KEYS) {
+        // Comma-separated list
+        console.log('   Using WALLET_PRIVATE_KEYS (comma-separated)');
+        walletPrivateKeys = process.env.WALLET_PRIVATE_KEYS
+            .split(',')
+            .map(key => key.trim())
+            .filter(key => key.length > 0);
+    }
+    else {
+        // Check for individual wallet env vars (WALLET_1, WALLET_2, etc.)
+        let i = 1;
+        while (process.env[`WALLET_${i}`]) {
+            console.log(`   Found WALLET_${i}`);
+            walletPrivateKeys.push(process.env[`WALLET_${i}`]);
+            i++;
+        }
+    }
+    // Fallback to single wallet if no multiple wallets found
+    if (walletPrivateKeys.length === 0 && process.env.WALLET_PRIVATE_KEY) {
+        console.log('   Using WALLET_PRIVATE_KEY');
+        walletPrivateKeys = [process.env.WALLET_PRIVATE_KEY];
+    }
+    // Validate wallets
+    if (walletPrivateKeys.length === 0) {
+        console.warn('⚠️  No wallets configured. Bot will run in monitoring-only mode.');
+    }
+    else {
+        console.log(`✅ Loaded ${walletPrivateKeys.length} wallet(s)`);
+    }
+    return {
+        // Network
+        rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+        // Wallet
+        walletPrivateKey: walletPrivateKeys.length > 0 ? walletPrivateKeys[0] : (process.env.WALLET_PRIVATE_KEY || ''),
+        walletPrivateKeys: walletPrivateKeys,
+        walletSelectionStrategy: process.env.WALLET_SELECTION_STRATEGY || 'round_robin',
+        // Trading Parameters
+        minSpreadPercent: parseFloat(process.env.MIN_SPREAD_PERCENT || '0.8'),
+        tradeAmountUsdc: parseFloat(process.env.TRADE_AMOUNT_USDC || '100'),
+        pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '10000'),
+        maxSlippagePercent: parseFloat(process.env.MAX_SLIPPAGE_PERCENT || '0.5'),
+        minProfitThreshold: parseFloat(process.env.MIN_PROFIT_THRESHOLD || '0.5'),
+        // Token Addresses (Mainnet)
+        tokens: {
+            // USDC on Solana mainnet
+            usdc: new web3_js_1.PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'),
+            // Tokenized stocks
+            rTSLA: process.env.RTSLA_MINT_ADDRESS
+                ? new web3_js_1.PublicKey(process.env.RTSLA_MINT_ADDRESS)
+                : null,
+            rCRCL: process.env.CRCL_MINT_ADDRESS
+                ? new web3_js_1.PublicKey(process.env.CRCL_MINT_ADDRESS)
+                : null,
+            rSPY: process.env.SPY_MINT_ADDRESS
+                ? new web3_js_1.PublicKey(process.env.SPY_MINT_ADDRESS)
+                : null,
+            rMSTR: process.env.MSTR_MINT_ADDRESS
+                ? new web3_js_1.PublicKey(process.env.MSTR_MINT_ADDRESS)
+                : null,
+            rNVDA: process.env.NVDA_MINT_ADDRESS
+                ? new web3_js_1.PublicKey(process.env.NVDA_MINT_ADDRESS)
+                : null,
+        },
+        // Platform Addresses
+        platforms: {
+            remoraPool: process.env.REMORA_POOL_ADDRESS || '',
+            flashTradeProgramId: process.env.FLASH_TRADE_PROGRAM_ID || '',
+            flashTradePool: process.env.FLASH_TRADE_POOL_ADDRESS || '',
+            portFinanceProgramId: process.env.PORT_FINANCE_PROGRAM_ID || '',
+            portFinancePool: process.env.PORT_FINANCE_POOL_ADDRESS || '',
+        },
+        // Pyth Oracle
+        pyth: {
+            // Pyth program on Solana mainnet
+            programId: new web3_js_1.PublicKey(process.env.PYTH_PROGRAM_ID || 'FsJ3A3u2vn5cTVofAjvy6y5kwABJAqYWpe4975bi2epH'),
+            // TSLA/USD price feed ID
+            tslaFeedId: process.env.PYTH_TSLA_FEED_ID || '',
+        },
+        // APIs
+        pythApiUrl: process.env.PYTH_API_URL || 'https://hermes.pyth.network/api',
+        birdeyeApiKey: process.env.BIRDEYE_API_KEY || '',
+        // Safety
+        maxGasPriceLamports: parseInt(process.env.MAX_GAS_PRICE_LAMPORTS || '5000'),
+        maxConsecutiveFailures: parseInt(process.env.MAX_CONSECUTIVE_FAILURES || '3'),
+        // Monitoring
+        logLevel: process.env.LOG_LEVEL || 'info',
+        enableTelegramAlerts: process.env.ENABLE_TELEGRAM_ALERTS === 'true',
+        telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+        telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
+        // Advanced
+        autoExecute: process.env.AUTO_EXECUTE === 'true',
+        useJitoBundles: process.env.USE_JITO_BUNDLES === 'true',
+        maxConcurrentTrades: parseInt(process.env.MAX_CONCURRENT_TRADES || '1'),
+        retryFailedTransactions: process.env.RETRY_FAILED_TRANSACTIONS !== 'false',
+        maxRetries: parseInt(process.env.MAX_RETRIES || '2'),
+        // Paths
+        logsDir: path.join(__dirname, '../../logs'),
+        dataDir: path.join(__dirname, '../../data'),
+    };
+}
+exports.config = loadConfig();
+// Validation warnings
+if (!exports.config.walletPrivateKey) {
+    console.warn('\n⚠️  WARNING: No wallet configured. Running in MONITORING-ONLY mode.');
+    console.warn('   To enable trading, set WALLET_PRIVATE_KEY in .env file\n');
+}
+if (exports.config.autoExecute && !exports.config.walletPrivateKey) {
+    console.error('❌ ERROR: AUTO_EXECUTE is true but no wallet configured!');
+    process.exit(1);
+}
+//# sourceMappingURL=config.js.map
