@@ -243,27 +243,112 @@ export class TradeExecutor {
         logger.info(`📊 Oracle price: $${params.oraclePrice.toFixed(2)}`);
         logger.info(`💡 Arbitrage opportunity: Buy at $${buyPrice.toFixed(2)} → Sell at $${params.oraclePrice.toFixed(2)}`);
 
-        // SIMPLIFIED AUTOMATED STRATEGY:
-        // Buy low on Jupiter, wait for price to improve, sell on Jupiter
+        // PROPER CONVERGENCE STRATEGY:
+        // Buy low on Jupiter, monitor continuously, sell when profitable
         
-        logger.info(`💡 Arbitrage Strategy: Buy low → Wait for price convergence → Sell`);
-        logger.info(`   Buy price: $${buyPrice.toFixed(2)}`);
+        logger.info(`💡 Convergence Strategy: Buy low → Monitor → Sell when profitable`);
+        logger.info(`   Entry price: $${buyPrice.toFixed(2)}`);
         logger.info(`   Oracle target: $${params.oraclePrice.toFixed(2)}`);
-        logger.info(`   Spread: ${((params.oraclePrice - buyPrice) / buyPrice * 100).toFixed(2)}%`);
+        logger.info(`   Initial spread: ${((params.oraclePrice - buyPrice) / buyPrice * 100).toFixed(2)}%`);
 
-        // Wait for DEX price to catch up to oracle price
-        logger.info(`⏳ Waiting 10s for DEX price to adjust...`);
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        // CONVERGENCE MONITORING LOOP (2-10 minutes)
+        const entryTime = Date.now();
+        const MIN_HOLD_TIME = 120;  // 2 minutes minimum
+        const MAX_HOLD_TIME = 600;  // 10 minutes maximum
+        const CHECK_INTERVAL = 15;  // Check every 15 seconds
+        const TAKE_PROFIT = 0.008;  // 0.8% profit target
+        const STOP_LOSS = -0.005;   // -0.5% stop loss
+        
+        logger.info(`\n📊 MONITORING POSITION:`);
+        logger.info(`   Min hold: ${MIN_HOLD_TIME}s (${(MIN_HOLD_TIME/60).toFixed(1)} min)`);
+        logger.info(`   Max hold: ${MAX_HOLD_TIME}s (${(MAX_HOLD_TIME/60).toFixed(1)} min)`);
+        logger.info(`   Check interval: ${CHECK_INTERVAL}s`);
+        logger.info(`   Take profit: ${(TAKE_PROFIT*100).toFixed(1)}%`);
+        logger.info(`   Stop loss: ${(STOP_LOSS*100).toFixed(1)}%\n`);
 
-        // Get updated Jupiter sell quote
-        logger.info(`🔄 Getting updated sell quote from Jupiter...`);
-        const sellResult = await this.jupiterClient.executeSellSwap(
-          params.tokenMint,
-          tokensReceived,
-          keypair,
-          9, // 9 decimals for rTokens
-          100 // 1% slippage for sell
-        );
+        let sellResult;
+        let checkCount = 0;
+        
+        while (true) {
+          checkCount++;
+          const holdTime = (Date.now() - entryTime) / 1000;
+          
+          // Wait before checking (except first check)
+          if (checkCount > 1) {
+            await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL * 1000));
+          }
+          
+          // Get current Jupiter price
+          const currentQuote = await this.jupiterClient.getQuote(
+            params.tokenMint,
+            Math.floor(tokensReceived * 1_000_000_000), // Convert to lamports
+            100 // 1% slippage
+          );
+          
+          if (!currentQuote) {
+            logger.warn(`⚠️ Failed to get price quote, retrying...`);
+            continue;
+          }
+          
+          const currentSellPrice = (Math.floor(tokensReceived * 1_000_000_000) / parseInt(currentQuote.outAmount)) * 1_000_000;
+          const profit = (currentSellPrice - buyPrice) / buyPrice;
+          const profitUSD = (currentSellPrice - buyPrice) * tokensReceived;
+          
+          logger.info(`[${holdTime.toFixed(0)}s] Check #${checkCount}: Price $${currentSellPrice.toFixed(2)} | Profit: ${(profit*100).toFixed(2)}% ($${profitUSD.toFixed(2)})`);
+          
+          // EXIT CONDITION 1: Take Profit
+          if (profit >= TAKE_PROFIT && holdTime >= MIN_HOLD_TIME) {
+            logger.info(`\n✅ TAKE PROFIT: ${(profit*100).toFixed(2)}% profit reached!`);
+            sellResult = await this.jupiterClient.executeSellSwap(
+              params.tokenMint,
+              tokensReceived,
+              keypair,
+              9,
+              100
+            );
+            break;
+          }
+          
+          // EXIT CONDITION 2: Stop Loss
+          if (profit <= STOP_LOSS) {
+            logger.warn(`\n⚠️ STOP LOSS: ${(profit*100).toFixed(2)}% loss - exiting position`);
+            sellResult = await this.jupiterClient.executeSellSwap(
+              params.tokenMint,
+              tokensReceived,
+              keypair,
+              9,
+              100
+            );
+            break;
+          }
+          
+          // EXIT CONDITION 3: Maximum Hold Time
+          if (holdTime >= MAX_HOLD_TIME) {
+            logger.info(`\n⏰ MAX HOLD TIME: ${(holdTime/60).toFixed(1)} minutes - exiting position`);
+            logger.info(`   Final profit: ${(profit*100).toFixed(2)}%`);
+            sellResult = await this.jupiterClient.executeSellSwap(
+              params.tokenMint,
+              tokensReceived,
+              keypair,
+              9,
+              100
+            );
+            break;
+          }
+          
+          // EXIT CONDITION 4: Minimum hold time met + positive profit
+          if (holdTime >= MIN_HOLD_TIME && profit > 0 && profit >= 0.003) {
+            logger.info(`\n💰 PROFITABLE EXIT: ${(profit*100).toFixed(2)}% profit after ${(holdTime/60).toFixed(1)} min`);
+            sellResult = await this.jupiterClient.executeSellSwap(
+              params.tokenMint,
+              tokensReceived,
+              keypair,
+              9,
+              100
+            );
+            break;
+          }
+        }
 
         if (!sellResult.success) {
           logger.error(`⚠️  Sell failed: ${sellResult.error}`);
