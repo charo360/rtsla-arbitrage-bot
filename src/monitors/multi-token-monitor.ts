@@ -211,7 +211,7 @@ export class MultiTokenMonitor {
       ]);
 
       if (!remoraPrice || !yahooPrice) {
-        logger.debug(`${token.symbol}: Unable to fetch prices`);
+        logger.warn(`${token.symbol}: Unable to fetch prices - Remora: ${remoraPrice}, Yahoo: ${yahooPrice}`);
         return false;
       }
 
@@ -226,7 +226,7 @@ export class MultiTokenMonitor {
 
       // Log price info
       const direction = spread > 0 ? 'BUY_REMORA' : 'SELL_REMORA';
-      logger.info(`${token.symbol.padEnd(8)} | Remora: $${remoraPrice.toFixed(2).padStart(8)} | Oracle: $${yahooPrice.toFixed(2).padStart(8)} | Spread: ${spreadPercent.toFixed(2).padStart(6)}%`);
+      console.log(`${token.symbol.padEnd(8)} | Remora: $${remoraPrice.toFixed(2).padStart(8)} | Oracle: $${yahooPrice.toFixed(2).padStart(8)} | Spread: ${spreadPercent.toFixed(2).padStart(6)}%`);
 
       // Check if opportunity exists
       if (absSpreadPercent >= config.minSpreadPercent) {
@@ -344,11 +344,18 @@ export class MultiTokenMonitor {
       );
 
       const result = response.data?.chart?.result?.[0];
-      if (!result) return null;
+      if (!result) {
+        logger.warn(`No Yahoo data for ${symbol}`);
+        return null;
+      }
 
       const price = result.meta?.regularMarketPrice;
+      if (!price) {
+        logger.warn(`No price in Yahoo data for ${symbol}`);
+      }
       return price || null;
-    } catch (error) {
+    } catch (error: any) {
+      logger.error(`Yahoo API error for ${symbol}: ${error.message}`);
       return null;
     }
   }

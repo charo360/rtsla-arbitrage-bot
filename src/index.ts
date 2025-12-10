@@ -1,13 +1,13 @@
-import { PriceMonitor } from './monitors/price-monitor';
+import { MultiTokenMonitor } from './monitors/multi-token-monitor';
 import { logger, logStartup } from './utils/logger';
 import { config } from './config/config';
 
 class ArbitrageBot {
-  private monitor: PriceMonitor;
+  private monitor: MultiTokenMonitor;
   private isRunning: boolean = false;
   
   constructor() {
-    this.monitor = new PriceMonitor();
+    this.monitor = new MultiTokenMonitor();
   }
   
   async start(): Promise<void> {
@@ -47,14 +47,11 @@ class ArbitrageBot {
     
     logger.info('\n🛑 Shutting down gracefully...');
     
-    // Get final stats
+    // Get final stats for all tokens
     const stats = this.monitor.getStats();
-    logger.info('📊 Final Session Stats:', {
-      totalChecks: stats.totalChecks,
-      opportunitiesFound: stats.opportunitiesFound,
-      avgSpread: `${stats.avgSpread.toFixed(2)}%`,
-      maxSpread: `${stats.maxSpread.toFixed(2)}%`,
-      estimatedProfit: `$${stats.totalEstimatedProfit.toFixed(2)}`
+    logger.info('📊 Final Session Stats:');
+    stats.forEach((tokenStats, symbol) => {
+      logger.info(`  ${symbol}: ${tokenStats.opportunitiesFound} opportunities, avg spread: ${tokenStats.avgSpread.toFixed(2)}%`);
     });
     
     this.isRunning = false;
