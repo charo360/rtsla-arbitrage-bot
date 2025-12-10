@@ -268,6 +268,8 @@ export class TradeExecutor {
 
         let sellResult;
         let checkCount = 0;
+        let failedQuotes = 0;
+        const MAX_FAILED_QUOTES = 5;
         
         while (true) {
           checkCount++;
@@ -278,21 +280,41 @@ export class TradeExecutor {
             await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL * 1000));
           }
           
-          // Get current Jupiter price
-          const currentQuote = await this.jupiterClient.getQuote(
+          // Get current sell quote (token → USDC)
+          const currentQuote = await this.jupiterClient.getQuoteReverse(
             params.tokenMint,
-            Math.floor(tokensReceived * 1_000_000_000), // Convert to lamports
+            tokensReceived,
+            9, // 9 decimals for rTokens
             100 // 1% slippage
           );
           
           if (!currentQuote) {
-            logger.warn(`⚠️ Failed to get price quote, retrying...`);
+            failedQuotes++;
+            logger.warn(`⚠️ Failed to get sell quote (${failedQuotes}/${MAX_FAILED_QUOTES}), retrying...`);
+            
+            // If too many failed quotes, exit with emergency sell attempt
+            if (failedQuotes >= MAX_FAILED_QUOTES) {
+              logger.error(`❌ Too many failed quotes, attempting emergency sell...`);
+              sellResult = await this.jupiterClient.executeSellSwap(
+                params.tokenMint,
+                tokensReceived,
+                keypair,
+                9,
+                500 // 5% slippage for emergency
+              );
+              break;
+            }
             continue;
           }
           
-          const currentSellPrice = (Math.floor(tokensReceived * 1_000_000_000) / parseInt(currentQuote.outAmount)) * 1_000_000;
-          const profit = (currentSellPrice - buyPrice) / buyPrice;
-          const profitUSD = (currentSellPrice - buyPrice) * tokensReceived;
+          // Reset failed quote counter on success
+          failedQuotes = 0;
+          
+          // Calculate current sell price and profit
+          const usdcOut = parseInt(currentQuote.outAmount) / 1_000_000;
+          const currentSellPrice = usdcOut / tokensReceived;
+          const profit = (usdcOut - buyPrice * tokensReceived) / (buyPrice * tokensReceived);
+          const profitUSD = usdcOut - (buyPrice * tokensReceived);
           
           logger.info(`[${holdTime.toFixed(0)}s] Check #${checkCount}: Price $${currentSellPrice.toFixed(2)} | Profit: ${(profit*100).toFixed(2)}% ($${profitUSD.toFixed(2)})`);
           
