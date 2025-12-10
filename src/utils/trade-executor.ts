@@ -264,18 +264,22 @@ export class TradeExecutor {
         logger.info(`   Max hold: ${MAX_HOLD_TIME}s (${(MAX_HOLD_TIME/60).toFixed(1)} min)`);
         logger.info(`   Check interval: ${CHECK_INTERVAL}s`);
         logger.info(`   Take profit: ${(TAKE_PROFIT*100).toFixed(1)}%`);
-        logger.info(`   Stop loss: ${(STOP_LOSS*100).toFixed(1)}%\n`);
+        logger.info(`   No stop loss - waiting for convergence\n`);
 
         let sellResult;
         let checkCount = 0;
         let failedQuotes = 0;
         const MAX_FAILED_QUOTES = 5;
         
+        // Wait minimum hold time before first check to avoid immediate stop loss from spread
+        logger.info(`⏳ Waiting ${MIN_HOLD_TIME}s before first price check...`);
+        await new Promise(resolve => setTimeout(resolve, MIN_HOLD_TIME * 1000));
+        
         while (true) {
           checkCount++;
           const holdTime = (Date.now() - entryTime) / 1000;
           
-          // Wait before checking (except first check)
+          // Wait between checks (except first check, already waited MIN_HOLD_TIME)
           if (checkCount > 1) {
             await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL * 1000));
           }
@@ -331,20 +335,7 @@ export class TradeExecutor {
             break;
           }
           
-          // EXIT CONDITION 2: Stop Loss
-          if (profit <= STOP_LOSS) {
-            logger.warn(`\n⚠️ STOP LOSS: ${(profit*100).toFixed(2)}% loss - exiting position`);
-            sellResult = await this.jupiterClient.executeSellSwap(
-              params.tokenMint,
-              tokensReceived,
-              keypair,
-              9,
-              100
-            );
-            break;
-          }
-          
-          // EXIT CONDITION 3: Maximum Hold Time
+          // EXIT CONDITION 2: Maximum Hold Time
           if (holdTime >= MAX_HOLD_TIME) {
             logger.info(`\n⏰ MAX HOLD TIME: ${(holdTime/60).toFixed(1)} minutes - exiting position`);
             logger.info(`   Final profit: ${(profit*100).toFixed(2)}%`);
@@ -358,8 +349,8 @@ export class TradeExecutor {
             break;
           }
           
-          // EXIT CONDITION 4: Minimum hold time met + positive profit
-          if (holdTime >= MIN_HOLD_TIME && profit > 0 && profit >= 0.003) {
+          // EXIT CONDITION 3: Minimum hold time met + any positive profit
+          if (holdTime >= MIN_HOLD_TIME && profit > 0.002) {
             logger.info(`\n💰 PROFITABLE EXIT: ${(profit*100).toFixed(2)}% profit after ${(holdTime/60).toFixed(1)} min`);
             sellResult = await this.jupiterClient.executeSellSwap(
               params.tokenMint,
